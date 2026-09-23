@@ -4,6 +4,8 @@ from datetime import date
 from io import BytesIO
 from pathlib import Path
 import os
+import hashlib
+import json
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -25,11 +27,14 @@ st.markdown('''<style>
 def load_demo():return demo_data()
 @st.cache_data(show_spinner=False)
 def load_files(files,supplier):return parse_files(files,supplier)
+CALCULATION_VERSION=hashlib.sha256(b''.join((Path(__file__).parent/'src'/name).read_bytes() for name in ['engine.py','forecasting.py','pooled.py'])).hexdigest()
 @st.cache_data(show_spinner=False)
-def run(ds,cfg):return calculate(ds,cfg)
+def cached_run(ds,cfg,version):return calculate(ds,cfg)
+def run(ds,cfg):return cached_run(ds,cfg,CALCULATION_VERSION)
 
 LABELS={'stock_threshold':'Порог пополнения','stock_basis':'Основание остатка','snapshot_date':'Дата снимка','snapshot_stock':'Остаток в снимке','recorded_sales':'Продажи после снимка','scenario_stock':'Сценарный остаток','snapshot_age_days':'Возраст снимка, дней','sku':'Код 1С','article':'Артикул','name':'Товар','category':'Категория','supplier':'Поставщик','unit':'Ед.','stock':'Свободный остаток','in_transit':'Приедет в период','late_transit':'Приедет позже','forecast':'Прогноз спроса','safety':'Страховой запас','daily':'Спрос в день','growth':'Тренд, %','season':'Сезонный коэффициент','excluded':'Исключено всплесков','lost':'Восстановлено спроса','pack':'Кратность','moq':'Минимальная партия','recommended':'Рекомендация','status':'Статус','reason':'Обоснование','stockout_mode':'Оценка отсутствия'}
 LABELS.update(method='Выбранный метод',demand_type='Характер спроса',cv_months='Месяцев внутренней проверки',cv_wape='Внутренняя ошибка, %',stress_recommended='Заказ в стресс-сценарии',first_shortage='Первый риск дефицита',source_growth_percent='Рост из сводки, %',quantity='К заказу',calculated_at='Дата расчёта',planning_method='Метод расчёта')
+LABELS.update(bridge_need='Потребность до позднего поступления',expedite_need='Не хватает до новой поставки',order_arrival='Приход нового заказа',reviewer='Проверил',calculation_id='Версия расчёта',planning_parameters='Параметры расчёта')
 LABELS.update(source_growth='Прирост поставщика, доля',growth_source='Источник прироста',unknown_transit='Путь с неясной датой')
 
 def export_excel(frame, cfg):
@@ -162,8 +167,13 @@ cards[0].metric('Товаров в анализе',len(result))
 cards[1].metric('Нужно заказать',int(result.recommended.gt(0).sum()))
 cards[2].metric('Риск дефицита',int(result.status.eq('Срочно').sum()))
 cards[3].metric('Нужны данные',int(result.recommended.isna().sum()))
-orders_tab,detail_tab,quality_tab,comparison_tab=st.tabs(['Рекомендации','Почему столько','Качество данных','Сравнение методов'])
+calculation_id=hashlib.sha256((result.to_json(date_format='iso')+json.dumps(vars(cfg),sort_keys=True,ensure_ascii=False)+ds.transit.to_json(date_format='iso')).encode()).hexdigest()[:16]
+orders_tab,detail_tab,quality_tab,comparison_tab,evidence_tab=st.tabs(['Рекомендации','Почему столько','Качество данных','Сравнение методов','Проверка кейса'])
 with orders_tab:
+    urgent=result[result.status.eq('Срочно')]
+    if not urgent.empty:
+        st.warning(f'{len(urgent)} позиций требуют ускорения поставки или перемещения: обычный заказ не успеет до дефицита. Количества и даты — во вкладке «Почему столько».')
+    st.caption('1. Проверьте данные → 2. Откройте обоснование → 3. Утвердите позиции → 4. Выгрузите заказ поставщику.')
     a,b=st.columns([2,1]);search=a.text_input('Найти товар',placeholder='Название, артикул или код')
     statuses=b.multiselect('Статус',list(result.status.unique()),default=list(result.status.unique()))
     selected=result[result.status.isin(statuses)].copy()
@@ -178,13 +188,20 @@ with orders_tab:
         if draft.empty:st.info('Нет положительных рекомендаций для утверждения.')
         else:
             draft=draft[[c for c in ['sku','article','name','supplier','unit','recommended','pack','moq','stock_basis','snapshot_date','reason'] if c in draft]].copy();draft['Утвердить']=False;draft['К заказу']=draft.recommended
-            reviewed=st.data_editor(draft.rename(columns=LABELS),hide_index=True,disabled=['Код 1С','Артикул','Товар','Поставщик','Ед.','Рекомендация','Кратность','Минимальная партия','Основание остатка','Дата снимка','Обоснование'],column_config={'К заказу':st.column_config.NumberColumn(min_value=0)},key=f'approval-{mode}-{supplier}')
+            draft=draft[['Утвердить','К заказу']+[c for c in draft.columns if c not in ['Утвердить','К заказу']]]
+            reviewed=st.data_editor(draft.rename(columns=LABELS),hide_index=True,disabled=['Код 1С','Артикул','Товар','Поставщик','Ед.','Рекомендация','Кратность','Минимальная партия','Основание остатка','Дата снимка','Обоснование'],column_config={'К заказу':st.column_config.NumberColumn(min_value=0)},key=f'approval-{mode}-{supplier}-{calculation_id}')
             approved=reviewed[reviewed['Утвердить']&reviewed['К заказу'].gt(0)]
             bad=approved[(approved['К заказу']<approved['Минимальная партия'])|~np.isclose(approved['К заказу']%approved['Кратность'],0)]
             if len(bad):st.error('Исправьте количество: оно должно соответствовать минимуму и кратности.')
-            acknowledge=True if stock_evidence.empty else st.checkbox('Понимаю: это сценарный заказ с предполагаемыми остатками')
-            st.download_button('Скачать утверждённые позиции',export_excel(approved,cfg),file_name='axioma-approved.xlsx',disabled=approved.empty or not bad.empty or not acknowledge)
-            if st.button('Добавить утверждённые позиции в общую корзину',disabled=approved.empty or not bad.empty or not acknowledge):
+            reviewer=st.text_input('Кто проверил заказ',key=f'reviewer-{mode}-{supplier}',placeholder='Имя или внутренний идентификатор менеджера')
+            approved=approved.copy()
+            approved['Проверил']=reviewer.strip()
+            approved['Версия расчёта']=calculation_id
+            approved['Параметры расчёта']=json.dumps(vars(cfg),ensure_ascii=False,sort_keys=True)
+            st.caption('При изменении входных данных или настроек отметки утверждения сбрасываются. В корзине остаются отдельно сохранённые версии.')
+            acknowledge=True if stock_evidence.empty else st.checkbox('Понимаю: это сценарный заказ с предполагаемыми остатками',key=f'scenario-ack-{calculation_id}')
+            st.download_button('Скачать утверждённые позиции',export_excel(approved,cfg),file_name='axioma-approved.xlsx',disabled=approved.empty or not bad.empty or not acknowledge or not reviewer.strip())
+            if st.button('Добавить утверждённые позиции в общую корзину',disabled=approved.empty or not bad.empty or not acknowledge or not reviewer.strip()):
                 lines=approved.rename(columns={v:k for k,v in LABELS.items()}).copy()
                 lines=lines.drop(columns=['Утвердить'],errors='ignore')
                 lines['calculated_at']=str(as_of);lines['planning_method']=method
@@ -205,6 +222,8 @@ with detail_tab:
     sku=st.selectbox('Выберите товар',list(histories),format_func=lambda k:f"{k} · {result.set_index('sku').loc[k,'name']}") if histories else None
     if sku:
         row=result.set_index('sku').loc[sku];st.subheader(row['name']);st.write(row.reason)
+        if row.expedite_need>0:st.error(f'До {row.order_arrival} не хватает до {row.expedite_need:g} {row.unit}. Действие: ускорить существующую поставку или согласовать перемещение. Этот объём не нужно автоматически прибавлять к заказу.')
+        elif row.bridge_need>max(0,row.forecast+row.safety-row.stock-row.in_transit)+0.1:st.info(f'Проверка по датам: нужно перекрыть {row.bridge_need:g} {row.unit} до позднего поступления. Его общий объём достаточен, но срок не закрывает промежуточный спрос.')
         c1,c2,c3=st.columns(3);c1.metric('Рекомендовано',f'{row.recommended:g}' if pd.notna(row.recommended) else 'Нужен остаток');c2.metric('Порог пополнения',f'{row.stock_threshold:g}');c3.metric('Восстановлено спроса',row.lost)
         st.write('Метод:',row.method,'· Характер спроса:',row.demand_type)
         st.line_chart(histories[sku].set_index('Дата'),color=['#94A3B8','#0D9488','#F59E0B'])
@@ -231,7 +250,7 @@ with detail_tab:
                 st.info(f'Стресс-сценарий: {row.stress_recommended:g} ед. к заказу, если спрос превысит прогноз на величину 90-го процентиля прошлых положительных ошибок. Это ориентир для проверки, не гарантированный уровень сервиса.')
 with quality_tab:
     st.subheader('Прозрачный расчёт')
-    st.write('Заказ = прогноз на срок поставки и интервал пересмотра + страховой запас − свободный остаток − поступления в этот период. Положительный результат округляется с учётом минимума и кратности.')
+    st.write('Заказ = прогноз на срок поставки и интервал пересмотра + страховой запас − свободный остаток − поступления в этот период. Дополнительно проверяется баланс каждого дня после прихода нового заказа: позднее поступление не должно скрыть промежуточный дефицит. Берётся большая из двух потребностей, затем учитываются минимум и кратность.')
     st.write('Крупные накладные и всплески клиента за день проверяются устойчивым порогом по распределению объёмов. Подозрительный объём заменяется типичным; исходные файлы не изменяются.')
     st.dataframe(pd.DataFrame(ds.sources),hide_index=True,width='stretch')
     if not anomalies.empty:st.markdown('**Обнаруженные всплески**');st.dataframe(anomalies,hide_index=True,width='stretch')
@@ -246,7 +265,7 @@ with comparison_tab:
         report_path=Path(__file__).parent/'docs'/report_name
         if report_path.exists():
             report=json.loads(report_path.read_text(encoding='utf-8'))
-            published.append({'Поставщик':report['supplier'],'Проверено товаров':report['evaluated_skus'],'С положительным фактом':report['scored_skus'],'Ошибка исходной модели, %':round(report['macro_wape_model'],2),'Ошибка среднего, %':round(report['macro_wape_baseline'],2),'Ошибка общей ML-модели, %':round(report['macro_wape_pooled'],2)})
+            published.append({'Поставщик':report['supplier'],'Проверено товаров':report['evaluated_skus'],'С положительным фактом':report['scored_skus'],'Ошибка исходной модели, %':round(report['macro_wape_model'],2),'Ошибка среднего, %':round(report['macro_wape_baseline'],2),'Ошибка автовыбора, %':round(report['macro_wape_adaptive'],2),'Ошибка общей ML-модели, %':round(report['macro_wape_pooled'],2)})
     if published:
         st.subheader('Сохранённая проверка полного подходящего каталога')
         st.dataframe(pd.DataFrame(published),hide_index=True,width='stretch')
@@ -287,3 +306,21 @@ with comparison_tab:
             st.caption('Для каждого товара WAPE = сумма абсолютных ошибок / сумма факта; затем берём среднее по товарам с положительным фактом. Меньше — лучше, ошибка может быть выше 100%. Это не «процент точности» и не денежная экономия.')
             st.dataframe(scores.rename(columns={'sku':'Код 1С','months':'Месяцев','actual_total':'Факт за период','model_wape':'Ошибка исходной модели, %','baseline_wape':'Ошибка среднего, %','adaptive_wape':'Ошибка автовыбора, %','pooled_wape':'Ошибка общей ML-модели, %'}),hide_index=True,width='stretch')
             st.download_button('Скачать результаты проверки',export_excel(detail.rename(columns={'month':'Месяц','actual':'Факт','model':'Прогноз Axioma','baseline':'Прогноз среднего'}),cfg),file_name='axioma-validation.xlsx')
+
+with evidence_tab:
+    st.subheader('Пять обязательных требований — проверка в один клик')
+    st.write('Система сама меняет по одному входному условию и показывает результат до и после. Это воспроизводимые синтетические примеры, а не оценка экономии или точности на данных компании.')
+    st.caption('Для изоляции арифметики примеры используют исходную модель с явно заданными переключателями. Прогноз ML на реальных данных проверяется отдельно во вкладке «Сравнение методов».')
+    if st.button('Запустить проверку требований',type='primary'):
+        from src.evidence import acceptance_examples
+        st.session_state['acceptance_evidence']=acceptance_examples()
+    if 'acceptance_evidence' in st.session_state:
+        checks=st.session_state['acceptance_evidence']
+        passed=int(checks['Результат'].eq('Пройдено').sum())
+        if passed==len(checks):st.success(f'{passed} из {len(checks)} проверок пройдено: все пять обязательных требований представлены.')
+        else:st.error(f'Пройдено {passed} из {len(checks)}: проверьте строки с ошибкой.')
+        st.dataframe(checks,hide_index=True,width='stretch')
+        st.download_button('Скачать протокол проверки · CSV',checks.to_csv(index=False).encode('utf-8-sig'),file_name='axioma-case-checks.csv',mime='text/csv')
+    st.markdown('**Что требуется для пилота у Электрокомплект**')
+    st.write('Ежедневный свободный остаток и резервы; обезличенный ID клиента; точные периоды отсутствия; согласованные сроки, MOQ и единицы закупки. Подключение этих источников позволит проверять решения на новом периоде.')
+    st.caption('План пилота: 2 недели параллельного расчёта с менеджером без автоматической отправки. Измерять время подготовки заказа, долю ручных правок и дни дефицита; денежный эффект считать только после получения цен и фактических затрат.')

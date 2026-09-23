@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.streamlit/secrets.toml
+.env
+data/private/
+data/raw/
+*.zip
+*.xlsx
+!data/demo/*.xlsx
+approved_orders/
+*.log

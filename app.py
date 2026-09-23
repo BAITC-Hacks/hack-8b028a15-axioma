@@ -127,6 +127,7 @@ with st.expander('Данные и допущения · проверить пе�
 cfg=Settings(str(as_of),int(lead),int(review),int(safety),float(growth),remove,seasonal,trend,compensate,approx,category_factors)
 with st.spinner('Считаю спрос и заказы…'):result,histories,anomalies=run(ds,cfg)
 if result.empty:st.warning('Нет позиций для расчёта');st.stop()
+result=result.assign(_priority=result.status.map({'Срочно':0,'Заказать':1,'Нужен остаток':2,'Нет истории':3,'Достаточно':4})).sort_values(['_priority','sku']).drop(columns='_priority').reset_index(drop=True)
 cards=st.columns(4)
 cards[0].metric('Товаров в анализе',len(result))
 cards[1].metric('Нужно заказать',int(result.recommended.gt(0).sum()))

@@ -1,0 +1,133 @@
+{
+  "measured_at": "2026-09-23T11:59:11.512683+00:00",
+  "commit": "01b10ac78bc32c0a3061f300f072da3902df3cd8",
+  "environment": {
+    "os": "Darwin",
+    "machine": "arm64",
+    "python": "3.14.7",
+    "pandas": "3.0.6",
+    "numpy": "2.5.3"
+  },
+  "scope": "XLSX read + forecast + finite scenarios + full recommendation XLSX in memory. Excludes UI, user review and network. No Streamlit cache; OS cache may be warm.",
+  "settings": {
+    "as_of": "2026-09-23",
+    "lead_days": 21,
+    "review_days": 14,
+    "safety_days": 7,
+    "growth_percent": 0,
+    "remove_outliers": true,
+    "seasonality": true,
+    "trend": true,
+    "compensate_stockout": true,
+    "approximate_stockout": false,
+    "category_factors": {},
+    "forecast_method": "pooled",
+    "use_source_growth": false
+  },
+  "grid": {
+    "stock_percent": 20.0,
+    "demand_percent": 20.0,
+    "delay_days": 7
+  },
+  "repeats": 3,
+  "reports": [
+    {
+      "supplier": "Systeme Electric",
+      "counts": {
+        "products": 724,
+        "scenarios": 10674,
+        "positive_base_orders": 19,
+        "unknown_base_orders": 227,
+        "stock_changes_order": 47,
+        "stock_changes_urgency": 14,
+        "new_urgent_delay": 1,
+        "delay_evaluable": 497
+      },
+      "runs": [
+        {
+          "import_seconds": 2.158,
+          "forecast_seconds": 7.187,
+          "scenarios_seconds": 2.111,
+          "export_seconds": 0.202,
+          "total_seconds": 11.657
+        },
+        {
+          "import_seconds": 2.179,
+          "forecast_seconds": 6.946,
+          "scenarios_seconds": 2.18,
+          "export_seconds": 0.164,
+          "total_seconds": 11.469
+        },
+        {
+          "import_seconds": 2.193,
+          "forecast_seconds": 6.564,
+          "scenarios_seconds": 2.144,
+          "export_seconds": 0.167,
+          "total_seconds": 11.069
+        }
+      ],
+      "median_seconds": 11.469,
+      "min_seconds": 11.069,
+      "max_seconds": 11.657,
+      "outlier_filter_comparison": {
+        "evaluable_orders": 497,
+        "changed_orders": 10,
+        "smaller_orders": 5,
+        "larger_orders": 5,
+        "interpretation": "Different quantities are not proof of better decisions or savings. No cross-SKU quantity sum."
+      }
+    },
+    {
+      "supplier": "IEK",
+      "counts": {
+        "products": 3184,
+        "scenarios": 60108,
+        "positive_base_orders": 0,
+        "unknown_base_orders": 3184,
+        "stock_changes_order": 350,
+        "stock_changes_urgency": 305,
+        "new_urgent_delay": 0,
+        "delay_evaluable": 0
+      },
+      "runs": [
+        {
+          "import_seconds": 15.463,
+          "forecast_seconds": 30.527,
+          "scenarios_seconds": 9.478,
+          "export_seconds": 0.843,
+          "total_seconds": 56.31
+        },
+        {
+          "import_seconds": 16.836,
+          "forecast_seconds": 31.261,
+          "scenarios_seconds": 10.199,
+          "export_seconds": 0.905,
+          "total_seconds": 59.202
+        },
+        {
+          "import_seconds": 16.857,
+          "forecast_seconds": 32.015,
+          "scenarios_seconds": 9.689,
+          "export_seconds": 0.925,
+          "total_seconds": 59.485
+        }
+      ],
+      "median_seconds": 59.202,
+      "min_seconds": 56.31,
+      "max_seconds": 59.485,
+      "outlier_filter_comparison": {
+        "evaluable_orders": 0,
+        "changed_orders": 0,
+        "smaller_orders": 0,
+        "larger_orders": 0,
+        "interpretation": "Different quantities are not proof of better decisions or savings. No cross-SKU quantity sum."
+      }
+    }
+  ],
+  "unmeasured": [
+    "manual Excel preparation time",
+    "manager review time",
+    "money saved",
+    "post-deployment stockouts"
+  ]
+}

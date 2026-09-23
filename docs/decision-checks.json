@@ -1,0 +1,80 @@
+[
+  {
+    "dataset": "real",
+    "supplier": "Systeme Electric",
+    "files": 6,
+    "products": 724,
+    "settings": {
+      "as_of": "2026-09-23",
+      "lead_days": 21,
+      "review_days": 14,
+      "safety_days": 7,
+      "growth_percent": 0,
+      "remove_outliers": true,
+      "seasonality": true,
+      "trend": true,
+      "compensate_stockout": true,
+      "approximate_stockout": false,
+      "category_factors": {},
+      "forecast_method": "pooled",
+      "use_source_growth": false
+    },
+    "grid": {
+      "stock_percent": 20.0,
+      "demand_percent": 20.0,
+      "delay_days": 7
+    },
+    "scenarios": 10674,
+    "decisions": {
+      "Пополнение не требуется в проверенных сценариях": 519,
+      "Недостаточно данных для сценариев": 138,
+      "Решение зависит от допущений": 47,
+      "Пополнение во всех проверенных сценариях": 20
+    },
+    "count_queue": 268,
+    "delay_evaluable": 497,
+    "new_urgent_after_7_days": 1,
+    "changed_order_after_7_days": 0,
+    "assertions": "passed",
+    "elapsed_seconds": 11.65
+  },
+  {
+    "dataset": "real",
+    "supplier": "IEK",
+    "files": 6,
+    "products": 3184,
+    "settings": {
+      "as_of": "2026-09-23",
+      "lead_days": 21,
+      "review_days": 14,
+      "safety_days": 7,
+      "growth_percent": 0,
+      "remove_outliers": true,
+      "seasonality": true,
+      "trend": true,
+      "compensate_stockout": true,
+      "approximate_stockout": false,
+      "category_factors": {},
+      "forecast_method": "pooled",
+      "use_source_growth": false
+    },
+    "grid": {
+      "stock_percent": 20.0,
+      "demand_percent": 20.0,
+      "delay_days": 7
+    },
+    "scenarios": 60108,
+    "decisions": {
+      "Пополнение не требуется в проверенных сценариях": 1931,
+      "Недостаточно данных для сценариев": 807,
+      "Решение зависит от допущений": 352,
+      "Пополнение во всех проверенных сценариях": 94
+    },
+    "count_queue": 3184,
+    "delay_evaluable": 0,
+    "new_urgent_after_7_days": 0,
+    "changed_order_after_7_days": 0,
+    "assertions": "passed",
+    "elapsed_seconds": 53.19
+  }
+]

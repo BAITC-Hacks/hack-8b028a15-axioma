@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from .data import Dataset, number
 from .forecasting import adaptive_forecast
+from .planning import inventory_plan, receipt_schedule
 
 @dataclass
 class Settings:
@@ -102,7 +103,7 @@ def calculate(ds: Dataset, settings: Settings, _pooled=None):
         sku=p.sku
         s=sales_by_sku.get(sku,raw.iloc[:0]).groupby('date').quantity.sum().sort_index()
         if s.empty:
-            results.append(dict(sku=sku,article=p.article,name=p['name'],category=str(p.category),supplier=ds.supplier,stock=p.stock,recommended=np.nan,status='Нет истории',reason='Нет завершённых месяцев продаж. Нужна ручная оценка.'));continue
+            results.append(dict(sku=sku,article=p.article,name=p['name'],category=str(p.category),supplier=ds.supplier,unit=p.unit,pack=max(number(p.pack,1),1),moq=max(number(p.moq,1),1),stock=p.stock,expedite_need=np.nan,first_shortage=None,order_arrival=str((asof+pd.Timedelta(days=cfg.lead_days)).date()),recommended=np.nan,status='Нет истории',reason='Нет завершённых месяцев продаж. Нужна ручная оценка.'));continue
         full=pd.date_range(s.index.min(),cutoff-pd.offsets.MonthBegin(1),freq='MS')
         s=s.reindex(full,fill_value=0)
         regular=s.clip(lower=0).astype(float).copy(); excluded=0.0
@@ -164,7 +165,7 @@ def calculate(ds: Dataset, settings: Settings, _pooled=None):
         future=pd.date_range(asof,periods=horizon)
         future_season=float(np.mean([factors[d.month] for d in future]))
         rate=max(0,daily*(1+growth)*(1+cfg.growth_percent/100)*future_season)
-        daily_rates=np.full(horizon,rate)
+        daily_rates=np.full(horizon,rate,dtype=float)
         model_info=dict(method='Эвристическая модель',demand_type='Не классифицирован',cv_months=0,cv_wape=np.nan,stress_daily=0.,candidates=[])
         source_growth=number(p.get('source_growth_percent',np.nan),100*number(p.get('source_growth'),np.nan))
         if np.isfinite(source_growth):source_growth=float(np.clip(source_growth,-90,300))
@@ -192,30 +193,12 @@ def calculate(ds: Dataset, settings: Settings, _pooled=None):
             late=float(arriving.loc[arriving.eta.ge(asof+pd.Timedelta(days=horizon)),'quantity'].clip(lower=0).sum())
             unknown_eta=float(arriving.loc[arriving.eta.isna()|arriving.eta.lt(asof),'quantity'].clip(lower=0).sum())
         stock=number(p.stock,np.nan);pack=max(number(p.pack,1),1);moq=max(number(p.moq,1),1)
-        # A receipt at the end of the horizon cannot cover an earlier gap.
-        # Orders arrive at the start of day lead_days; pre-arrival deficits
-        # require a separate expedite action, not a fictional earlier receipt.
-        receipts=pd.Series(0.,index=future)
-        if not arriving.empty:
-            dated=arriving.dropna(subset=['eta']).copy()
-            dated['eta']=pd.to_datetime(dated.eta).dt.normalize()
-            dated['quantity']=dated.quantity.clip(lower=0)
-            receipts=dated.groupby('eta').quantity.sum().reindex(future,fill_value=0.)
-        net_demand=np.cumsum(daily_rates-receipts.to_numpy())
-        bridge_threshold=max(0.,float(net_demand[cfg.lead_days:].max())) if cfg.lead_days<horizon else 0.
-        stock_threshold=max(0.,forecast+safety-due,bridge_threshold)
-        need=max(0,stock_threshold-stock) if np.isfinite(stock) else np.nan
-        order=math.ceil(max(need,moq)/pack)*pack if np.isfinite(need) and need>1e-8 else 0 if np.isfinite(need) else np.nan
-        # Date-aware deficit before the newly placed order arrives.
-        shortage=False; first_shortage=None
-        if np.isfinite(stock):
-            before=stock-net_demand[:cfg.lead_days]
-            deficits=np.flatnonzero(before < -1e-8)
-            if len(deficits):
-                shortage=True
-                first_shortage=str(future[deficits[0]].date())
-        bridge_need=max(0.,bridge_threshold-stock) if np.isfinite(stock) else np.nan
-        expedite_need=max(0.,float(net_demand[:cfg.lead_days].max())-stock) if np.isfinite(stock) else np.nan
+        receipts=receipt_schedule(arriving,future)
+        plan=inventory_plan(daily_rates,receipts,stock,cfg.lead_days,safety,pack,moq)
+        order=plan['recommended'];stock_threshold=plan['stock_threshold']
+        bridge_threshold=plan['bridge_threshold'];bridge_need=plan['bridge_need']
+        expedite_need=plan['expedite_need'];shortage=plan['urgent']
+        first_shortage=str(future[plan['first_shortage_index']].date()) if shortage else None
         status='Нужен остаток' if not np.isfinite(stock) else 'Срочно' if shortage else 'Заказать' if order>0 else 'Достаточно'
         reason=(f'Спрос {forecast:.1f} + страховой запас {safety:.1f} − свободный остаток {stock:.1f} − поступления {due:.1f}. '
                 f'Минимум {moq:g}, кратность {pack:g}. Исключено разовых продаж: {excluded:.1f}; восстановлено спроса: {lost:.1f}.') if np.isfinite(stock) else f'Текущий остаток неизвестен. При остатке ниже {stock_threshold:.1f} ед. по этой модели нужно пополнение. Количество рассчитывается после выбора сценария или ввода остатка.'

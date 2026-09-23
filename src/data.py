@@ -154,7 +154,7 @@ def parse_files(files, supplier):
 def demo_data():
     ds=Dataset('Демо · синтетические данные')
     names=['Розетка ATLAS','Выключатель BRITE','Кабель силовой','Автомат защиты','Светильник LED','Коробка монтажная']
-    ds.products=pd.DataFrame([dict(sku=f'DEMO-{i+1:03}',article=f'ART-{i+1:03}',name=n,category=str(i%3+1),stock=[25,180,12,0,400,15][i],pack=[10,5,1,12,1,10][i],moq=1,unit='шт') for i,n in enumerate(names)])
+    ds.products=pd.DataFrame([dict(sku=f'DEMO-{i+1:03}',article=f'ART-{i+1:03}',name=n,category=str(i%3+1),stock=[10,np.nan,12,0,np.nan,15][i],pack=[10,5,1,12,1,10][i],moq=1,unit='м' if i==2 else 'шт') for i,n in enumerate(names)])
     rng=np.random.default_rng(42); tx=[]
     for i,p in ds.products.iterrows():
         for day in pd.date_range('2024-01-01','2026-09-22'):
@@ -167,6 +167,7 @@ def demo_data():
     ds.transactions=pd.DataFrame(tx)
     ds.sales=ds.transactions.assign(date=ds.transactions.date.dt.to_period('M').dt.to_timestamp()).groupby(['sku','date'],as_index=False).quantity.sum()
     ds.transit=pd.DataFrame([dict(sku='DEMO-001',eta=pd.Timestamp('2026-09-28'),quantity=30),dict(sku='DEMO-003',eta=pd.Timestamp('2026-12-01'),quantity=500)])
+    ds.stocks=pd.DataFrame([dict(sku='DEMO-002',date=pd.Timestamp('2026-09-01'),quantity=120.)])
     ds.stockouts=pd.DataFrame([dict(sku='DEMO-004',start=pd.Timestamp('2026-07-01'),end=pd.Timestamp('2026-07-20'))])
     ds.sources=[dict(Файл='Встроенный пример',Тип='Синтетический набор, не данные компании',Строк=len(tx))]
     return ds

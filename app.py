@@ -13,6 +13,8 @@ from src.data import demo_data, parse_files, unpack_excel_archive
 from src.engine import Settings, calculate
 from src.scenarios import stock_scenario, annotate_scenario
 from src.orders import add_reviewed_lines
+from src.robustness import ScenarioSettings, analyse_scenarios, recount_queue, INSUFFICIENT
+from src.planning import receipt_schedule
 
 st.set_page_config(page_title='Axioma · Закупки',page_icon='◈',layout='wide')
 st.markdown('''<style>
@@ -24,18 +26,23 @@ st.markdown('''<style>
 </style>''',unsafe_allow_html=True)
 
 @st.cache_data(show_spinner=False)
-def load_demo():return demo_data()
+def load_demo(version):return demo_data()
 @st.cache_data(show_spinner=False)
 def load_files(files,supplier):return parse_files(files,supplier)
-CALCULATION_VERSION=hashlib.sha256(b''.join((Path(__file__).parent/'src'/name).read_bytes() for name in ['engine.py','forecasting.py','pooled.py'])).hexdigest()
+CALCULATION_VERSION=hashlib.sha256(b''.join((Path(__file__).parent/'src'/name).read_bytes() for name in ['engine.py','forecasting.py','pooled.py','planning.py','robustness.py','data.py'])).hexdigest()
 @st.cache_data(show_spinner=False)
 def cached_run(ds,cfg,version):return calculate(ds,cfg)
 def run(ds,cfg):return cached_run(ds,cfg,CALCULATION_VERSION)
+@st.cache_data(show_spinner=False)
+def cached_scenarios(ds,cfg,result,histories,options,version):
+    return analyse_scenarios(ds,cfg,result,histories,options)
 
 LABELS={'stock_threshold':'Порог пополнения','stock_basis':'Основание остатка','snapshot_date':'Дата снимка','snapshot_stock':'Остаток в снимке','recorded_sales':'Продажи после снимка','scenario_stock':'Сценарный остаток','snapshot_age_days':'Возраст снимка, дней','sku':'Код 1С','article':'Артикул','name':'Товар','category':'Категория','supplier':'Поставщик','unit':'Ед.','stock':'Свободный остаток','in_transit':'Приедет в период','late_transit':'Приедет позже','forecast':'Прогноз спроса','safety':'Страховой запас','daily':'Спрос в день','growth':'Тренд, %','season':'Сезонный коэффициент','excluded':'Исключено всплесков','lost':'Восстановлено спроса','pack':'Кратность','moq':'Минимальная партия','recommended':'Рекомендация','status':'Статус','reason':'Обоснование','stockout_mode':'Оценка отсутствия'}
 LABELS.update(method='Выбранный метод',demand_type='Характер спроса',cv_months='Месяцев внутренней проверки',cv_wape='Внутренняя ошибка, %',stress_recommended='Заказ в стресс-сценарии',first_shortage='Первый риск дефицита',source_growth_percent='Рост из сводки, %',quantity='К заказу',calculated_at='Дата расчёта',planning_method='Метод расчёта')
 LABELS.update(bridge_need='Потребность до позднего поступления',expedite_need='Не хватает до новой поставки',order_arrival='Приход нового заказа',reviewer='Проверил',calculation_id='Версия расчёта',planning_parameters='Параметры расчёта')
 LABELS.update(source_growth='Прирост поставщика, доля',growth_source='Источник прироста',unknown_transit='Путь с неясной датой')
+
+LABELS.update(robustness='Устойчивость решения',order_min='Минимум заказа в сценариях',order_max='Максимум заказа в сценариях',scenario_count='Проверено сценариев',scenario_assumptions='Границы проверенной сетки',scenario_basis='Основания сценарных остатков',scenario_snapshot_date='Дата опорного снимка',scenario_snapshot_age_days='Давность снимка, дней',sensitivity_reason='Причины изменения решения',count_reason='Почему пересчитать',count_priority='Приоритет пересчёта',relative_order_span='Относительный разброс заказа',stock_min='Минимум проверенного остатка',stock_max='Максимум проверенного остатка',stock_origin='Источник уточнения',input_batch='Версия входных файлов',source_files='Источники данных',scenario_order='Заказ в сценарии',scenario_expedite='Дефицит до нового заказа',scenario_shortage='Начало дефицита',demand_multiplier='Множитель спроса',delay_days='Задержка поступлений, дней',stock_assumption='Допущение об остатке',delay_order_before='Заказ: вовремя',delay_order_after='Заказ: задержка 7 дней',delay_order_change='Изменение заказа',delay_expedite_before='Дефицит до нового заказа: вовремя',delay_expedite_after='Дефицит до нового заказа: задержка',delay_new_urgent='Стал срочным',delay_first_shortage='Начало дефицита при задержке')
 
 def export_excel(frame, cfg):
     buffer=BytesIO()
@@ -77,10 +84,10 @@ with st.sidebar:
 
 st.markdown('<div class="eyebrow">AXIOMA / INVENTORY INTELLIGENCE</div>',unsafe_allow_html=True)
 st.title('Заказы поставщикам')
-st.markdown('<div class="intro">Продажи, склад и ожидаемые поставки — в одном расчёте. Каждая рекомендация сопровождается понятным объяснением.</div>',unsafe_allow_html=True)
+st.markdown('<div class="intro">Что заказать, что ускорить и что сначала проверить. Неполные данные превращаются в объяснимое решение с явными допущениями.</div>',unsafe_allow_html=True)
 
 if mode=='Показать пример':
-    ds=deepcopy(load_demo())
+    ds=deepcopy(load_demo(CALCULATION_VERSION))
     st.info('Демонстрационный набор: 6 товаров, сезонность, рост, разовая покупка на 1 500 единиц и известный период отсутствия товара. Это синтетические данные.')
 else:
     uploaded=st.file_uploader('Загрузите ZIP-архив или все 6 Excel-файлов выбранного поставщика',type=['xlsx','zip'],accept_multiple_files=True)
@@ -104,6 +111,13 @@ else:
     with st.spinner('Читаю файлы и связываю товары по коду 1С…'):ds=deepcopy(load_files(inputs,supplier))
     if ds.products.empty:st.error('Не удалось найти товары. Проверьте отчёт об импорте ниже.');st.write(ds.warnings);st.stop()
 
+# Scope manual corrections to the actual input batch, not just supplier name.
+batch_payload=ds.products.to_json(date_format='iso')+ds.stocks.to_json(date_format='iso')+ds.sales.to_json(date_format='iso')+ds.transit.to_json(date_format='iso')
+if mode=='Файлы поставщика':batch_payload+=''.join(name+hashlib.sha256(raw).hexdigest() for name,raw in inputs)
+dataset_id=hashlib.sha256((supplier+batch_payload).encode()).hexdigest()[:16]
+count_key=f'counts-{dataset_id}-{as_of}'
+ds.products['stock_origin']='Остаток из входных файлов' if mode=='Файлы поставщика' else 'Синтетический остаток демо'
+
 with st.expander('Данные и допущения · проверить перед заказом',expanded=False):
     st.dataframe(pd.DataFrame(ds.sources),hide_index=True,width='stretch')
     for warning in ds.warnings:st.warning(warning)
@@ -123,10 +137,16 @@ with st.expander('Данные и допущения · проверить пе�
             if 'stock' in extra and (extra.stock<0).any():raise ValueError('Свободный остаток должен быть неотрицательным')
             if any(c in extra and (extra[c]<=0).any() for c in ['pack','moq']):raise ValueError('Кратность и минимум должны быть положительными')
             base.update(extra[[c for c in ['stock','category','pack','moq'] if c in extra]])
+            changed_codes=base.index.intersection(extra.index[extra.stock.notna()])
+            base.loc[changed_codes,'stock_origin']=f'CSV остатков: {overrides.name}; дата снимка не задана'
+            ds.sources.append({'file':overrides.name,'type':'Ручной CSV остатков','rows':len(changed_codes)})
             ds.products=base.reset_index();st.caption(f'Обновлено {len(base.index.intersection(extra.index))} товаров; не найдено {len(extra.index.difference(base.index))}.')
         except Exception as exc:st.error(f'CSV не применён: {exc}')
-    changed=st.data_editor(ds.products.rename(columns=LABELS),disabled=['Код 1С','Артикул','Товар','Ед.'],hide_index=True,width='stretch',key=f'products-{mode}-{supplier}',column_config={'Свободный остаток':st.column_config.NumberColumn(min_value=0),'Кратность':st.column_config.NumberColumn(min_value=1),'Минимальная партия':st.column_config.NumberColumn(min_value=1),'Прирост поставщика, доля':st.column_config.NumberColumn(min_value=-.9,max_value=3.,help='0.2 означает +20%. Если задан, заменяет тренд из истории.')})
-    ds.products=changed.rename(columns={v:k for k,v in LABELS.items()})
+    changed=st.data_editor(ds.products.rename(columns=LABELS),disabled=['Код 1С','Артикул','Товар','Ед.','Источник уточнения'],hide_index=True,width='stretch',key=f'products-{dataset_id}',column_config={'Свободный остаток':st.column_config.NumberColumn(min_value=0),'Кратность':st.column_config.NumberColumn(min_value=1),'Минимальная партия':st.column_config.NumberColumn(min_value=1),'Прирост поставщика, доля':st.column_config.NumberColumn(min_value=-.9,max_value=3.,help='0.2 означает +20%. Если задан, заменяет тренд из истории.')})
+    changed=changed.rename(columns={v:k for k,v in LABELS.items()})
+    edited_stock=~(changed.stock.eq(ds.products.stock)|(changed.stock.isna()&ds.products.stock.isna()))
+    changed.loc[edited_stock,'stock_origin']='Ручное изменение остатка в таблице; дата снимка не задана'
+    ds.products=changed
     st.caption('CSV отсутствия товара: sku,start,end, даты YYYY-MM-DD. Оба конца периода включены.')
     stockout_file=st.file_uploader('Подтверждённые периоды отсутствия',type=['csv'])
     if stockout_file:
@@ -143,6 +163,17 @@ with st.expander('Данные и допущения · проверить пе�
     cat_frame=st.data_editor(pd.DataFrame({'Категория':categories,'Множитель':[1.]*len(categories)}),disabled=['Категория'],hide_index=True,key=f'cat-{mode}-{supplier}',column_config={'Множитель':st.column_config.NumberColumn(min_value=0.,max_value=5.)})
     category_factors=dict(zip(cat_frame['Категория'],cat_frame['Множитель']))
 
+# A confirmed physical count is a separate, dated override of imported data.
+for code,amount in st.session_state.get(count_key,{}).items():
+    ds.products.loc[ds.products.sku.eq(code),['stock','stock_origin']]=[amount,'Ручной пересчёт']
+source_ds=deepcopy(ds)
+with st.expander('Проверенные допущения · устойчивость решения'):
+    st.caption('Конечная сетка, а не доверительный интервал. За её пределами устойчивость не проверена. Для неизвестного остатка опора — датированный снимок и, если есть продажи, снимок минус продажи без учёта других движений.')
+    sc1,sc2,sc3=st.columns(3)
+    stock_pct=sc1.number_input('Отклонение остатка, ±%',min_value=0.,max_value=100.,value=20.,step=5.)
+    demand_pct=sc2.number_input('Отклонение спроса, ±%',min_value=0.,max_value=100.,value=20.,step=5.)
+    delay_days=sc3.number_input('Задержка в сетке, дней',min_value=0,max_value=90,value=7)
+scenario_options=ScenarioSettings(stock_pct,demand_pct,int(delay_days))
 stock_evidence=pd.DataFrame()
 if ds.products.stock.isna().any() and not ds.stocks.empty:
     st.markdown('**Расчёт при неполных данных об остатках**')
@@ -161,14 +192,27 @@ if method=='Обычное среднее за 6 месяцев':
 with st.spinner('Считаю спрос и заказы…'):result,histories,anomalies=run(ds,cfg)
 if not stock_evidence.empty:result=annotate_scenario(result,stock_evidence)
 if result.empty:st.warning('Нет позиций для расчёта');st.stop()
+with st.spinner('Проверяю устойчивость решения…'):
+    scenario_summary,scenario_details,delay_comparison=cached_scenarios(source_ds,cfg,result,histories,scenario_options,CALCULATION_VERSION)
+result=result.merge(scenario_summary,on='sku',validate='one_to_one')
+if 'stock_basis' not in result:result['stock_basis']=np.nan
+result['stock_basis']=result.stock_basis.astype(object).where(result.stock_basis.notna(),result.sku.map(source_ds.products.set_index('sku').stock_origin))
+result.loc[result.stock.isna(),'stock_basis']='Остаток неизвестен'
+confirmed=set(st.session_state.get(count_key,{}))
+known_codes=source_ds.products.loc[source_ds.products.stock.notna(),'sku']
+result.loc[result.sku.isin(known_codes),'stock_basis']=result.loc[result.sku.isin(known_codes),'sku'].map(source_ds.products.set_index('sku').stock_origin)
+result.loc[result.sku.isin(confirmed),'stock_basis']=f'Ручной пересчёт на {as_of}'
+result['input_batch']=dataset_id
+result['source_files']=json.dumps(source_ds.sources,ensure_ascii=False,default=str)
+queue=recount_queue(result)
 result=result.assign(_priority=result.status.map({'Срочно':0,'Заказать':1,'Нужен остаток':2,'Нет истории':3,'Достаточно':4})).sort_values(['_priority','sku']).drop(columns='_priority').reset_index(drop=True)
 cards=st.columns(4)
 cards[0].metric('Товаров в анализе',len(result))
-cards[1].metric('Нужно заказать',int(result.recommended.gt(0).sum()))
-cards[2].metric('Риск дефицита',int(result.status.eq('Срочно').sum()))
-cards[3].metric('Нужны данные',int(result.recommended.isna().sum()))
+cards[1].metric('Подготовить заказ',int(result.recommended.gt(0).sum()))
+cards[2].metric('Ускорить · включая сценарии',int((result.urgency_any|result.expedite_need.gt(0)).sum()))
+cards[3].metric('Проверить остаток',len(queue))
 calculation_id=hashlib.sha256((result.to_json(date_format='iso')+json.dumps(vars(cfg),sort_keys=True,ensure_ascii=False)+ds.transit.to_json(date_format='iso')).encode()).hexdigest()[:16]
-orders_tab,detail_tab,quality_tab,comparison_tab,evidence_tab=st.tabs(['Рекомендации','Почему столько','Качество данных','Сравнение методов','Проверка кейса'])
+orders_tab,detail_tab,quality_tab,comparison_tab,evidence_tab=st.tabs(['Рабочее место','Почему столько','Качество данных','Сравнение методов','Проверка кейса'])
 with orders_tab:
     urgent=result[result.status.eq('Срочно')]
     if not urgent.empty:
@@ -180,8 +224,71 @@ with orders_tab:
     if search:selected=selected[selected[['sku','article','name']].astype(str).apply(lambda s:s.str.contains(search,case=False,regex=False)).any(axis=1)]
     chosen_categories=st.multiselect('Категории',categories)
     if chosen_categories:selected=selected[selected.category.astype(str).isin(chosen_categories)]
-    columns=['status','sku','name','recommended','unit','first_shortage','stock','in_transit','forecast','stock_threshold','method','demand_type','stock_basis','article']
-    st.dataframe(selected[[c for c in columns if c in selected]].rename(columns=LABELS),hide_index=True,width='stretch')
+    action=st.radio('Выберите действие',['Подготовить заказ','Ускорить поставку','Проверить остаток'],horizontal=True)
+    st.caption('Группы могут пересекаться: товару одновременно нужны заказ и ускорение. Количества разных товаров не складываются.')
+    if action=='Подготовить заказ':selected=selected[selected.recommended.gt(0)]
+    elif action=='Ускорить поставку':
+        selected=selected[selected.urgency_any|selected.expedite_need.gt(0)]
+        st.caption('Здесь показан дефицит в выбранном расчёте или хотя бы одном проверенном сценарии. Откройте товар, чтобы отличить эти основания.')
+    else:
+        selected=queue[queue.sku.isin(selected.sku)]
+        st.subheader('Что пересчитать на складе в первую очередь')
+        st.caption('Сначала остаток, меняющий заказ да/нет или срочность; затем неизвестный остаток. Внутри приоритета — срочность, давность снимка и относительная чувствительность. Денежная выгода не оценивалась.')
+    columns=['sku','name','count_priority','count_reason','scenario_snapshot_age_days','robustness','order_min','order_max','recommended','unit','first_shortage','expedite_need','stock','stock_basis'] if action=='Проверить остаток' else ['sku','name','recommended','unit','order_min','order_max','robustness','first_shortage','expedite_need','stock','stock_basis']
+    st.dataframe(selected[[c for c in columns if c in selected]].rename(columns=LABELS),hide_index=True,width='stretch',column_config={'Код 1С':st.column_config.TextColumn(width='small'),'Товар':st.column_config.TextColumn(width='medium'),'Минимум заказа в сценариях':st.column_config.NumberColumn('Заказ от',width='small'),'Максимум заказа в сценариях':st.column_config.NumberColumn('Заказ до',width='small'),'Приоритет пересчёта':st.column_config.NumberColumn('Приоритет',width='small'),'Почему пересчитать':st.column_config.TextColumn(width='large')})
+    if st.checkbox('Показать задержку на 7 дней'):
+        st.markdown('**Что изменится, если ожидаемые поставки опоздают**')
+        st.caption('Все известные будущие поступления сдвинуты на 7 дней. Выбранные остатки, спрос и срок нового заказа неизменны. Просроченные поступления и путь без даты не считаются прибывшими. Это отдельный эксперимент, независимо от задержки в сетке.')
+        evaluated=delay_comparison[delay_comparison.delay_evaluable]
+        st.write(f'Стали срочными: {int(evaluated.delay_new_urgent.sum())} товаров. Изменился заказ: {int(evaluated.delay_order_change.abs().gt(1e-8).sum())}. Рассчитано {len(evaluated)} из {len(result)} товаров; остальным нужны остатки или история.')
+        show_delay=evaluated.merge(result[['sku','name','unit']],on='sku')
+        st.dataframe(show_delay.drop(columns=['delay_evaluable','delay_stock']).rename(columns=LABELS),hide_index=True,width='stretch')
+        st.warning('Неизменный размер заказа не означает отсутствие риска. Дефицит до прихода нового заказа устраняется ускорением или перемещением, а не обычным заказом.')
+    if not selected.empty:
+        focused=st.selectbox('Открыть решение по товару',selected.sku.tolist(),format_func=lambda code:f"{code} · {result.set_index('sku').loc[code,'name']}")
+        item=result.set_index('sku').loc[focused]
+        original=source_ds.products.set_index('sku').loc[focused]
+        st.markdown('#### Исходные данные → Допущения → Расчёт → Действие')
+        st.markdown('**1. Исходные данные**')
+        st.write(f'Остаток: {original.stock:g} {item.unit}' if pd.notna(original.stock) else 'Актуальный остаток неизвестен — он не подменён нулём.')
+        st.write(f'Основание выбранного расчёта: {item.stock_basis}. Поставщик: {item.supplier}. Кратность: {item.pack:g}; минимум: {item.moq:g} {item.unit}.')
+        incoming=source_ds.transit[source_ds.transit.sku.eq(focused)]
+        if not incoming.empty:st.dataframe(incoming.rename(columns={'eta':'Ожидаемая дата','quantity':'Количество','sku':'Код 1С'}),hide_index=True)
+        st.markdown('**2. Допущения**')
+        st.write(item.scenario_assumptions)
+        if item.scenario_count:
+            st.write(f'Проверенные остатки: {item.stock_min:g}–{item.stock_max:g} {item.unit}. Все основания и множители доступны в таблице сочетаний ниже.')
+        if pd.isna(original.stock):
+            snapshots=source_ds.stocks[source_ds.stocks.sku.eq(focused)&source_ds.stocks.date.le(pd.Timestamp(as_of))].sort_values('date')
+            if not snapshots.empty:
+                latest=snapshots.iloc[-1];st.write(f'Опорный снимок {latest.date.date()}: {latest.quantity:g} {item.unit}. Это не подтверждённый текущий остаток.')
+        st.markdown('**3. Расчёт**')
+        st.write(item.robustness)
+        st.write(item.sensitivity_reason)
+        if item.scenario_count:
+            st.write(f'Проверено {item.scenario_count:g} сочетаний. Заказ от {item.order_min:g} до {item.order_max:g} {item.unit}. {item.sensitivity_reason}.')
+            with st.expander('Каждое проверенное сочетание'):
+                trace=scenario_details[scenario_details.sku.eq(focused)]
+                st.dataframe(trace.rename(columns=LABELS),hide_index=True,width='stretch')
+                st.download_button('Скачать сценарии этого товара',export_excel(trace,{**vars(cfg),**vars(scenario_options)}),file_name=f'axioma-scenarios-{focused}.xlsx')
+        st.write(item.reason)
+        st.markdown('**4. Действие**')
+        if item.expedite_need>0:st.error(f'Ускорить или переместить: до {item.order_arrival} не хватает до {item.expedite_need:g} {item.unit}; первый риск {item.first_shortage}. Обычный заказ этот дефицит не устраняет.')
+        elif item.urgency_any:st.warning('Срочность возникает в части проверенных сценариев. Уточните остаток и даты до решения об ускорении.')
+        if pd.isna(item.recommended):st.warning('Утверждение заказа недоступно до уточнения данных или явного выбора расчётного сценария остатка.')
+        elif item.recommended>0:st.write(f'Подготовить {item.recommended:g} {item.unit} по выбранному расчёту; проверить и утвердить ниже. Диапазон сценариев не заменяет выбранную рекомендацию.')
+        else:st.write('По выбранному расчёту обычный заказ не требуется.')
+        if item.check_stock:st.info(item.count_reason)
+        with st.expander('Внести подтверждённый остаток после пересчёта'):
+            counted=st.number_input(f'Подтверждённый свободный остаток · {focused}',min_value=0.,value=float(original.stock) if pd.notna(original.stock) else 0.,key=f'count-value-{dataset_id}-{focused}-{as_of}')
+            st.caption(f'Указывайте фактический свободный остаток на {as_of}, в единицах {item.unit}. Исправление сохраняется в этой сессии для этих файлов и даты; оно попадёт в происхождение заказа.')
+            if st.button('Применить уточнённый остаток'):
+                saved=dict(st.session_state.get(count_key,{}));saved[focused]=counted;st.session_state[count_key]=saved;st.rerun()
+    else:st.info('В этой группе нет товаров по выбранным фильтрам.')
+    insufficient=result[result.robustness.eq(INSUFFICIENT)]
+    if not insufficient.empty:
+        with st.expander(f'Недостаточно данных даже для сценариев · {len(insufficient)}'):
+            st.dataframe(insufficient[['sku','name','sensitivity_reason']].rename(columns=LABELS),hide_index=True,width='stretch')
     st.download_button('Скачать все рекомендации · Excel',export_excel(result,cfg),file_name=f'axioma-{as_of}.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     with st.expander('Проверить и утвердить заказ'):
         draft=result[result.recommended.gt(0)].copy()
@@ -195,9 +302,12 @@ with orders_tab:
             if len(bad):st.error('Исправьте количество: оно должно соответствовать минимуму и кратности.')
             reviewer=st.text_input('Кто проверил заказ',key=f'reviewer-{mode}-{supplier}',placeholder='Имя или внутренний идентификатор менеджера')
             approved=approved.copy()
+            lineage=['stock','stock_basis','snapshot_date','snapshot_stock','recorded_sales','scenario_stock','snapshot_age_days','robustness','order_min','order_max','scenario_count','scenario_assumptions','scenario_basis','scenario_snapshot_date','scenario_snapshot_age_days','sensitivity_reason','expedite_need','first_shortage','input_batch','source_files']
+            extra=[c for c in lineage if c in result and LABELS.get(c,c) not in approved.columns]
+            approved=approved.merge(result[['sku']+extra].rename(columns=LABELS),on='Код 1С',how='left',validate='one_to_one')
             approved['Проверил']=reviewer.strip()
             approved['Версия расчёта']=calculation_id
-            approved['Параметры расчёта']=json.dumps(vars(cfg),ensure_ascii=False,sort_keys=True)
+            approved['Параметры расчёта']=json.dumps({**vars(cfg),'scenario_grid':vars(scenario_options)},ensure_ascii=False,sort_keys=True)
             st.caption('При изменении входных данных или настроек отметки утверждения сбрасываются. В корзине остаются отдельно сохранённые версии.')
             acknowledge=True if stock_evidence.empty else st.checkbox('Понимаю: это сценарный заказ с предполагаемыми остатками',key=f'scenario-ack-{calculation_id}')
             st.download_button('Скачать утверждённые позиции',export_excel(approved,cfg),file_name='axioma-approved.xlsx',disabled=approved.empty or not bad.empty or not acknowledge or not reviewer.strip())

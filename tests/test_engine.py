@@ -111,3 +111,10 @@ def test_transaction_only_sku_keeps_history_when_other_sku_has_monthly_report():
     result=calculate(d,Settings(seasonality=False,trend=False))[0].set_index('sku')
     assert result.loc['B','forecast']==35
     assert result.loc['A','forecast']==350  # Monthly report wins; do not add twice.
+
+
+def test_zero_demand_with_supplier_growth_does_not_fail_or_revive_demand():
+    ds=baseline();ds.sales['quantity']=0.
+    ds.products['source_growth']=.2
+    result,_,_=calculate(ds,Settings(use_source_growth=True))
+    assert result.iloc[0].forecast==0 and result.iloc[0].recommended==0

@@ -84,3 +84,113 @@ def test_approval_requires_reviewer_and_resets_after_input_change(monkeypatch):
     assert old_id!=new_id
     assert add().disabled
     assert app.session_state['order_cart'].equals(cart)
+
+
+def test_workbench_count_and_delay_flow():
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/'app.py',default_timeout=90).run()
+    next(c for c in app.checkbox if c.label=='Показать задержку на 7 дней').check().run()
+    assert not app.exception
+    assert any('Стали срочными: 1 товаров' in m.value for m in app.markdown)
+    next(r for r in app.radio if r.label=='Выберите действие').set_value('Проверить остаток').run()
+    next(s for s in app.selectbox if s.label=='Открыть решение по товару').set_value('DEMO-002').run()
+    assert not app.exception
+    assert any('Решение зависит от допущений' in m.value for m in app.markdown)
+    next(n for n in app.number_input if n.label=='Подтверждённый свободный остаток · DEMO-002').set_value(20).run()
+    next(b for b in app.button if b.label=='Применить уточнённый остаток').click().run()
+    assert not app.exception
+    next(r for r in app.radio if r.label=='Выберите действие').set_value('Подготовить заказ').run()
+    draft=next(d.value for d in app.dataframe if 'Утвердить' in d.value.columns)
+    row=draft.set_index('Код 1С').loc['DEMO-002']
+    assert row['Рекомендация']>0
+    assert row['Основание остатка']=='Ручной пересчёт на 2026-09-23'
+
+
+def test_approved_excel_contains_scenario_lineage_and_pack(monkeypatch):
+    from io import BytesIO
+    import pandas as pd
+    import streamlit as st
+    captured={}
+    real_download=st.download_button
+    real_editor=st.data_editor
+    def reviewed(data,*args,**kwargs):
+        value=real_editor(data,*args,**kwargs)
+        if str(kwargs.get('key','')).startswith('approval-'):
+            value=value.copy();value.loc[value.index[0],'Утвердить']=True
+        return value
+    def capture(label,data,*args,**kwargs):
+        captured[label]=(data,kwargs)
+        return real_download(label,data,*args,**kwargs)
+    monkeypatch.setattr(st,'data_editor',reviewed)
+    monkeypatch.setattr(st,'download_button',capture)
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/'app.py',default_timeout=90).run()
+    next(i for i in app.text_input if i.label=='Кто проверил заказ').set_value('Демо менеджер').run()
+    assert not app.exception
+    payload,options=captured['Скачать утверждённые позиции']
+    assert not options['disabled']
+    frame=pd.read_excel(BytesIO(payload))
+    assert len(frame)==1
+    row=frame.iloc[0]
+    assert row['К заказу']%row['Кратность']==0 and row['К заказу']>=row['Минимальная партия']
+    assert row['Проверил']=='Демо менеджер'
+    for col in ['Устойчивость решения','Минимум заказа в сценариях','Максимум заказа в сценариях','Границы проверенной сетки','Основания сценарных остатков','Основание остатка','Версия входных файлов','Источники данных','Версия расчёта']:
+        assert col in frame and pd.notna(row[col])
+    assert 'scenario_grid' in row['Параметры расчёта']
+
+
+def test_no_history_product_can_be_opened_in_count_queue(monkeypatch):
+    from src.data import demo_data
+    import src.data
+    ds=demo_data();ds.sales=ds.sales.iloc[:0];ds.transactions=ds.transactions.iloc[:0]
+    monkeypatch.setattr(src.data,'demo_data',lambda:ds)
+    import streamlit as st
+    st.cache_data.clear()
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/'app.py',default_timeout=90).run()
+    next(r for r in app.radio if r.label=='Выберите действие').set_value('Проверить остаток').run()
+    assert not app.exception
+    assert any('Нет завершённой истории продаж' in m.value for m in app.markdown)
+    st.cache_data.clear()
+
+
+def test_xlsx_upload_to_count_to_reviewed_export(monkeypatch):
+    """The real uploader return shape is emulated; XLSX parsing/export is real."""
+    from io import BytesIO
+    import pandas as pd
+    import streamlit as st
+    from test_importers import workbook
+    uploaded=BytesIO(workbook([
+        ['Дата','Номер','Документ','Код','Номенклатура','Ед.','Склад','Количество'],
+        ['15.07.2026','D1','Продажа','UPLOAD-001','Тест загрузки','шт','Склад',310],
+        ['15.08.2026','D2','Продажа','UPLOAD-001','Тест загрузки','шт','Склад',310],
+    ]));uploaded.name='synthetic-transactions.xlsx'
+    real_upload=st.file_uploader;real_editor=st.data_editor;real_download=st.download_button
+    downloads={}
+    def upload(label,*args,**kwargs):
+        real=real_upload(label,*args,**kwargs)
+        return [uploaded] if label.startswith('Загрузите ZIP') else real
+    def review(data,*args,**kwargs):
+        value=real_editor(data,*args,**kwargs)
+        if str(kwargs.get('key','')).startswith('approval-'):
+            value=value.copy();value.loc[value.index[0],'Утвердить']=True
+        return value
+    def capture(label,data,*args,**kwargs):
+        downloads[label]=(data,kwargs)
+        return real_download(label,data,*args,**kwargs)
+    monkeypatch.setattr(st,'file_uploader',upload)
+    monkeypatch.setattr(st,'data_editor',review)
+    monkeypatch.setattr(st,'download_button',capture)
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/'app.py',default_timeout=90).run()
+    next(r for r in app.radio if r.label=='Источник данных').set_value('Файлы поставщика').run()
+    assert not app.exception and app.metric[0].value=='1'
+    next(r for r in app.radio if r.label=='Выберите действие').set_value('Проверить остаток').run()
+    assert any('Недостаточно данных для сценариев' in m.value for m in app.markdown)
+    next(n for n in app.number_input if n.label=='Подтверждённый свободный остаток · UPLOAD-001').set_value(20).run()
+    next(b for b in app.button if b.label=='Применить уточнённый остаток').click().run()
+    next(i for i in app.text_input if i.label=='Кто проверил заказ').set_value('Проверка загрузки').run()
+    assert not app.exception
+    payload,options=downloads['Скачать утверждённые позиции']
+    assert not options['disabled']
+    frame=pd.read_excel(BytesIO(payload))
+    assert frame.iloc[0]['Код 1С']=='UPLOAD-001'
+    assert frame.iloc[0]['К заказу']>0
+    assert 'synthetic-transactions.xlsx' in frame.iloc[0]['Источники данных']
+    assert frame.iloc[0]['Основание остатка']=='Ручной пересчёт на 2026-09-23'

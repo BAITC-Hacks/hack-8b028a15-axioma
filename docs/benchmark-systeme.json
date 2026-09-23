@@ -1,0 +1,26 @@
+{
+  "eligible_skus": 582,
+  "selected_skus": 582,
+  "evaluated_skus": 582,
+  "months": [
+    "2026-06",
+    "2026-07",
+    "2026-08"
+  ],
+  "supplier": "Systeme Electric",
+  "scored_skus": 430,
+  "macro_wape_model": 190.88565017188176,
+  "macro_wape_baseline": 105.24142694472211,
+  "macro_wape_adaptive": 119.62690795048876,
+  "adaptive_wins": 165,
+  "adaptive_median_wape": 82.10833333333332,
+  "macro_wape_pooled": 104.39374886077056,
+  "pooled_wins": 204,
+  "zero_actual_skus": 152,
+  "zero_actual_forecast_positive": {
+    "model": 78,
+    "baseline": 78,
+    "adaptive": 75,
+    "pooled": 78
+  }
+}

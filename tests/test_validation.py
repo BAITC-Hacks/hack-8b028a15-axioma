@@ -18,6 +18,7 @@ def test_heldout_and_future_changes_cannot_change_earlier_prediction():
     d.seasonal={m:50 if m==6 else 1 for m in range(1,13)}
     after=backtest(d)[0]
     assert before.iloc[0].model==after.iloc[0].model
+    assert before.iloc[0].adaptive==after.iloc[0].adaptive
     assert before.iloc[0].actual!=after.iloc[0].actual
 
 

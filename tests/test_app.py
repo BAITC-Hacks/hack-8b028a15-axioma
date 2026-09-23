@@ -31,3 +31,15 @@ def test_baseline_method_can_be_selected():
     next(s for s in app.selectbox if s.label=='Метод расчёта').set_value('Обычное среднее за 6 месяцев').run()
     assert not app.exception
     assert any('Выбрано обычное среднее' in i.value for i in app.info)
+
+
+def test_existing_cart_renders_and_can_be_exported():
+    import pandas as pd
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/'app.py',default_timeout=90)
+    app.session_state['order_cart']=pd.DataFrame([dict(supplier='IEK',sku='A',quantity=12,pack=6,moq=10,reason='Проверенный пример',calculated_at='2026-09-23',planning_method='Test')])
+    app.run()
+    assert not app.exception
+    assert any(s.value=='Общая корзина поставщиков' for s in app.subheader)
+    next(b for b in app.button if b.label=='Очистить корзину этой сессии').click().run()
+    assert not app.exception
+    assert app.session_state['order_cart'].empty

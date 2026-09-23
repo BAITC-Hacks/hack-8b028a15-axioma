@@ -56,6 +56,9 @@ def pooled_forecasts(histories, future, use_seasonality=True, use_trend=True, se
                 known_dates=pd.date_range(end=month.to_timestamp()-pd.offsets.MonthBegin(1),periods=len(y),freq='MS')
                 local_mean=float(predict_rates(y,known_dates,[month.to_timestamp()],'supplier',seasonal)[0])
             rate=max(0,.5*float(pred)*scale+.5*local_mean)
+            # A shared positive intercept must not create purchases for dormant
+            # products. Confirmed stockouts were compensated before this step.
+            if not any(v>0 for v in y[-6:]):rate=0.
             monthly[sku][month]=rate;y.append(rate)
     for sku in result:
         result[sku]=np.array([monthly[sku][d.to_period('M')] for d in future])

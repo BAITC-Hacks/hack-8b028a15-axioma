@@ -1,0 +1,26 @@
+{
+  "eligible_skus": 2463,
+  "selected_skus": 2463,
+  "evaluated_skus": 2463,
+  "months": [
+    "2026-06",
+    "2026-07",
+    "2026-08"
+  ],
+  "supplier": "IEK",
+  "scored_skus": 1493,
+  "macro_wape_model": 222.97949285143764,
+  "macro_wape_baseline": 140.60860063363654,
+  "macro_wape_adaptive": 129.35294643645466,
+  "adaptive_wins": 623,
+  "adaptive_median_wape": 93.32876712328768,
+  "macro_wape_pooled": 133.0744825413337,
+  "pooled_wins": 692,
+  "zero_actual_skus": 970,
+  "zero_actual_forecast_positive": {
+    "model": 326,
+    "baseline": 326,
+    "adaptive": 328,
+    "pooled": 326
+  }
+}

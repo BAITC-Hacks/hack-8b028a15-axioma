@@ -3,10 +3,26 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from io import BytesIO
 import re
+import zipfile
 import numpy as np
 import pandas as pd
 
 MONTHS = {'янв':1,'фев':2,'мар':3,'апр':4,'май':5,'июн':6,'июл':7,'авг':8,'сен':9,'окт':10,'ноя':11,'дек':12}
+
+def unpack_excel_archive(content):
+    """Read XLSX members in memory; never extract paths onto the filesystem."""
+    with zipfile.ZipFile(BytesIO(content)) as archive:
+        entries=[e for e in archive.infolist() if not e.is_dir() and e.filename.lower().endswith('.xlsx')]
+        if not entries:raise ValueError('В архиве нет Excel-файлов')
+        if len(entries)>30 or sum(e.file_size for e in entries)>150_000_000:raise ValueError('Архив превышает лимит: 30 файлов / 150 МБ')
+        files=[]
+        for entry in entries:
+            name=entry.filename
+            if not entry.flag_bits & 0x800:
+                try:name=name.encode('cp437').decode('cp866')
+                except UnicodeError:pass
+            files.append((name.replace('\\','/').split('/')[-1],archive.read(entry)))
+        return files
 
 def key(value):
     if pd.isna(value): return ''
@@ -43,6 +59,7 @@ def parse_files(files, supplier):
     products={}; sales=[]; transactions=[]; stocks=[]; transit=[]
     def product(sku, **values):
         if not sku or sku.lower() in ('итого','nan'): return
+        if sku=='0' and not values.get('name'):return
         p=products.setdefault(sku,dict(sku=sku,article='',name='',category='Не указана',stock=np.nan,pack=1,moq=1,unit='шт'))
         for k,v in values.items():
             if v is not None and not (isinstance(v,float) and np.isnan(v)): p[k]=v
@@ -69,9 +86,7 @@ def parse_files(files, supplier):
                 for row in rows[hi+1:]:
                     sku=key(row[ix['Код 1с']]);
                     if not sku: continue
-                    product(sku,article=key(row[ix['Артикул поставщика']]),name=key(row[ix['Наименование']]),category=key(row[ix['Категория 2026']]),stock=number(row[ix['Свободный остаток']],np.nan))
-                    if 'Кэф. Роста' in ix:
-                        product(sku,source_growth_percent=100*number(row[ix['Кэф. Роста']],np.nan))
+                    product(sku,article=key(row[ix['Артикул поставщика']]),name=key(row[ix['Наименование']]),category=key(row[ix['Категория 2026']]),stock=number(row[ix['Свободный остаток']],np.nan),source_growth=number(row[ix['Кэф. Роста']],np.nan) if 'Кэф. Роста' in ix else None)
                     # This summary is a fallback only; the dedicated monthly report wins.
                     for ci,dt in mc: sales.append(dict(sku=sku,date=dt,quantity=number(row[ci]),priority=0))
                     for ci in tc:
@@ -108,6 +123,7 @@ def parse_files(files, supplier):
                 name_col=first.index('Номенклатура') if 'Номенклатура' in first else first.index('Наименование')
                 for row in rows[1:]:
                     sku=key(row[code_col]); n=number(row[value_col],1)
+                    if not key(row[name_col]):continue # Ignore trailing spreadsheet notes, not products.
                     product(sku,article=key(row[article_col]),name=key(row[name_col]),**({'pack':max(1,n)} if 'Кратность' in first else {'moq':max(1,n)}))
             elif any('СЕЗОННОСТЬ' in str(x).upper() for row in rows for x in row):
                 detected='Сезонность поставщика'
@@ -122,6 +138,7 @@ def parse_files(files, supplier):
             if detected=='Не распознан':ds.warnings.append(f'Не распознан файл: {filename}')
         except Exception as exc:ds.warnings.append(f'{filename}: {exc}')
     ds.products=pd.DataFrame(products.values()) if products else ds.products
+    if 'source_growth' not in ds.products:ds.products['source_growth']=np.nan
     if sales:
         ds.sales=pd.DataFrame(sales).sort_values('priority').drop_duplicates(['sku','date'],keep='last').drop(columns='priority')
     if transactions:ds.transactions=pd.DataFrame(transactions)

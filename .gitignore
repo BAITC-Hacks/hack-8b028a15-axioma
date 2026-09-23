@@ -5,6 +5,9 @@ __pycache__/
 .env.*
 !.env.example
 data/private/
+data/
+*.zip
+*.log
 *.xlsx
 *.xls
 .DS_Store

@@ -20,7 +20,7 @@ class Settings:
     approximate_stockout: bool = False
     category_factors: dict = field(default_factory=dict)
     forecast_method: str = 'legacy'
-    use_source_growth: bool = False
+    use_source_growth: bool = True
 
 def clean_transactions(tx):
     if tx.empty:return tx.copy(),pd.DataFrame()
@@ -36,6 +36,12 @@ def clean_transactions(tx):
             q1,q3=pos.quantile([.25,.75]); median=float(pos.median())
             threshold=max(5*median,float(q3+3*(q3-q1)),1)
             mask=g.quantity>threshold
+            # Three or more distinct purchase days by a known large client are
+            # treated as recurring demand, not deleted as a one-off project.
+            large=g[mask & g.client_id.fillna('').ne('')]
+            recurring=large.groupby('client_id').day.nunique()
+            recurring=set(recurring[recurring>=3].index)
+            mask &= ~g.client_id.isin(recurring)
             for _,r in g[mask].iterrows():out.append(dict(sku=sku,date=r.day,document=r.document,original=r.quantity,regular=median,excluded=r.quantity-median,reason='Крупная разовая накладная'))
             g.loc[mask,'quantity']=median
             # Catch one large client-day split into many smaller invoices.
@@ -45,7 +51,9 @@ def clean_transactions(tx):
                 positive=cg[cg>0]
                 if len(positive)>=8:
                     a,b=positive.quantile([.25,.75]); med=float(positive.median()); cap=max(5*med,float(b+3*(b-a)),1)
+                    counts=cg[cg>cap].reset_index().groupby('client_id').day.nunique()
                     for (client,day),qty in cg[cg>cap].items():
+                        if counts.get(client,0)>=3:continue
                         ix=g.client_id.eq(client)&g.day.eq(day)&g.quantity.gt(0)
                         total=g.loc[ix,'quantity'].sum()
                         if total>0:
@@ -57,11 +65,16 @@ def clean_transactions(tx):
 
 def calculate(ds: Dataset, settings: Settings, _pooled=None):
     cfg=settings; asof=pd.Timestamp(cfg.as_of).normalize(); cutoff=asof.replace(day=1)
+    for name,low,high in [('lead_days',1,365),('review_days',0,90),('safety_days',0,90),('growth_percent',-50,100)]:
+        value=getattr(cfg,name)
+        if not np.isfinite(value) or value<low or value>high:raise ValueError(f'Недопустимый параметр: {name}')
+    if any(not np.isfinite(v) or v<0 or v>5 for v in cfg.category_factors.values()):raise ValueError('Множитель категории должен быть от 0 до 5')
     if cfg.forecast_method=='pooled' and _pooled is None:
         from .pooled import pooled_forecasts
         _,prepared,_=calculate(ds,replace(cfg,forecast_method='legacy'))
         future=pd.date_range(asof,periods=cfg.lead_days+cfg.review_days)
-        _pooled=pooled_forecasts(prepared,future,cfg.seasonality,cfg.trend and not cfg.use_source_growth,ds.seasonal)
+        supplied=any(c in ds.products and ds.products[c].notna().any() for c in ['source_growth','source_growth_percent'])
+        _pooled=pooled_forecasts(prepared,future,cfg.seasonality,cfg.trend and not (cfg.use_source_growth and supplied),ds.seasonal)
     raw=ds.sales.copy()
     tx=ds.transactions.copy()
     if not tx.empty:
@@ -71,19 +84,23 @@ def calculate(ds: Dataset, settings: Settings, _pooled=None):
         raw_tx=tx.assign(date=tx.date.dt.to_period('M').dt.to_timestamp()).groupby(['sku','date']).quantity.sum()
         clean_tx=cleaned.assign(date=cleaned.date.dt.to_period('M').dt.to_timestamp()).groupby(['sku','date']).quantity.sum()
         removed=(raw_tx-clean_tx).clip(lower=0)
-        # Monthly reports take precedence. Transaction-only products still need
-        # their history when other products have a monthly report.
-        fallback=raw_tx.reset_index()
-        fallback=fallback[~fallback.sku.isin(raw.sku)]
-        if not fallback.empty:
-            raw=fallback if raw.empty else pd.concat([raw,fallback],ignore_index=True)
+        # Fill only missing SKU/month keys; never add duplicate monthly representations.
+        detailed=raw_tx.reset_index()
+        if raw.empty:raw=detailed
+        else:
+            known=pd.MultiIndex.from_frame(raw[['sku','date']])
+            missing=~pd.MultiIndex.from_frame(detailed[['sku','date']]).isin(known)
+            raw=pd.concat([raw,detailed.loc[missing]],ignore_index=True)
     else:removed=pd.Series(dtype=float); anomalies=pd.DataFrame()
     raw=raw[raw.date<cutoff].copy() # Do not use the incomplete current month.
-    sales_by_sku={sku:g.groupby('date').quantity.sum().sort_index() for sku,g in raw.groupby('sku')}
     histories={}; results=[]
+    sales_by_sku={k:g for k,g in raw.groupby('sku')}
+    transit_by_sku={k:g for k,g in ds.transit.groupby('sku')} if not ds.transit.empty else {}
+    stocks_by_sku={k:g for k,g in ds.stocks.groupby('sku')} if not ds.stocks.empty else {}
+    stockouts_by_sku={k:g for k,g in ds.stockouts.groupby('sku')} if not ds.stockouts.empty else {}
     for _,p in ds.products.iterrows():
         sku=p.sku
-        s=sales_by_sku.get(sku,pd.Series(dtype=float))
+        s=sales_by_sku.get(sku,raw.iloc[:0]).groupby('date').quantity.sum().sort_index()
         if s.empty:
             results.append(dict(sku=sku,article=p.article,name=p['name'],category=str(p.category),supplier=ds.supplier,stock=p.stock,recommended=np.nan,status='Нет истории',reason='Нет завершённых месяцев продаж. Нужна ручная оценка.'));continue
         full=pd.date_range(s.index.min(),cutoff-pd.offsets.MonthBegin(1),freq='MS')
@@ -103,9 +120,9 @@ def calculate(ds: Dataset, settings: Settings, _pooled=None):
                         if regular.loc[dt]>5*baseline:
                             excluded+=regular.loc[dt]-baseline;regular.loc[dt]=baseline
         corrected=regular.copy(); lost=0.; stockout_mode='Нет подтверждённых периодов'
-        periods=ds.stockouts[ds.stockouts.sku==sku] if not ds.stockouts.empty else ds.stockouts
-        if cfg.compensate_stockout:
-            known=ds.stocks[ds.stocks.sku==sku] if not ds.stocks.empty else ds.stocks
+        periods=stockouts_by_sku.get(sku,ds.stockouts.iloc[:0])
+        if cfg.compensate_stockout and (not periods.empty or cfg.approximate_stockout):
+            known=stocks_by_sku.get(sku,ds.stocks.iloc[:0])
             for dt in full:
                 days=dt.days_in_month; absent=set()
                 for _,r in periods.iterrows():
@@ -149,8 +166,9 @@ def calculate(ds: Dataset, settings: Settings, _pooled=None):
         rate=max(0,daily*(1+growth)*(1+cfg.growth_percent/100)*future_season)
         daily_rates=np.full(horizon,rate)
         model_info=dict(method='Эвристическая модель',demand_type='Не классифицирован',cv_months=0,cv_wape=np.nan,stress_daily=0.,candidates=[])
-        source_growth=number(p.get('source_growth_percent',np.nan),np.nan)
-        has_source_growth=cfg.use_source_growth and np.isfinite(source_growth)
+        source_growth=number(p.get('source_growth_percent',np.nan),100*number(p.get('source_growth'),np.nan))
+        if np.isfinite(source_growth):source_growth=float(np.clip(source_growth,-90,300))
+        has_source_growth=cfg.trend and cfg.use_source_growth and np.isfinite(source_growth)
         if cfg.forecast_method in ('adaptive','pooled'):
             daily_rates,model_info=adaptive_forecast(corrected,future,cfg.seasonality,cfg.trend and not has_source_growth,ds.seasonal)
             if cfg.forecast_method=='pooled' and sku in (_pooled or {}):
@@ -166,7 +184,7 @@ def calculate(ds: Dataset, settings: Settings, _pooled=None):
         forecast=float(daily_rates.sum())
         cat=float(cfg.category_factors.get(str(p.category),1))
         safety=rate*cfg.safety_days*cat
-        arriving=ds.transit[ds.transit.sku==sku] if not ds.transit.empty else ds.transit
+        arriving=transit_by_sku.get(sku,ds.transit.iloc[:0])
         due=0.; late=0.; unknown_eta=0.
         if not arriving.empty:
             within=arriving.eta.notna()&arriving.eta.ge(asof)&arriving.eta.lt(asof+pd.Timedelta(days=horizon))
@@ -198,6 +216,7 @@ def calculate(ds: Dataset, settings: Settings, _pooled=None):
         stress_need=max(0,forecast+safety+stress-stock-due) if np.isfinite(stock) else np.nan
         stress_order=math.ceil(max(stress_need,moq)/pack)*pack if np.isfinite(stress_need) and stress_need>1e-8 else 0 if np.isfinite(stress_need) else np.nan
         results[-1].update(method=model_info['method'],demand_type=model_info['demand_type'],cv_months=model_info['cv_months'],cv_wape=model_info['cv_wape'],stress_recommended=stress_order,first_shortage=first_shortage,source_growth_percent=source_growth if has_source_growth else np.nan)
+        results[-1].update(unknown_transit=unknown_eta,growth_source='Коэффициент поставщика' if has_source_growth else 'Метод по истории')
         histories[sku].attrs['model_info']=model_info
         histories[sku].attrs['future']=[{'Дата':str(d.date()),'Прогноз в день':float(v)} for d,v in zip(future,daily_rates)]
     return pd.DataFrame(results),histories,anomalies

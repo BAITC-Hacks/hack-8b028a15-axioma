@@ -7,14 +7,14 @@ import os
 import numpy as np
 import pandas as pd
 import streamlit as st
-from src.data import demo_data, parse_files
+from src.data import demo_data, parse_files, unpack_excel_archive
 from src.engine import Settings, calculate
 from src.scenarios import stock_scenario, annotate_scenario
 from src.orders import add_reviewed_lines
 
 st.set_page_config(page_title='Axioma · Закупки',page_icon='◈',layout='wide')
 st.markdown('''<style>
-.block-container{padding-top:2rem;max-width:1450px} h1{letter-spacing:-1.5px}
+.block-container{padding-top:4rem;max-width:1450px} h1{letter-spacing:-1.5px}
 [data-testid="stMetric"]{background:white;border:1px solid #e3e8ef;border-radius:14px;padding:18px}
 [data-testid="stSidebar"]{border-right:1px solid #e3e8ef}
 .eyebrow{font-size:12px;font-weight:700;letter-spacing:3px;color:#0d9488}
@@ -30,6 +30,7 @@ def run(ds,cfg):return calculate(ds,cfg)
 
 LABELS={'stock_threshold':'Порог пополнения','stock_basis':'Основание остатка','snapshot_date':'Дата снимка','snapshot_stock':'Остаток в снимке','recorded_sales':'Продажи после снимка','scenario_stock':'Сценарный остаток','snapshot_age_days':'Возраст снимка, дней','sku':'Код 1С','article':'Артикул','name':'Товар','category':'Категория','supplier':'Поставщик','unit':'Ед.','stock':'Свободный остаток','in_transit':'Приедет в период','late_transit':'Приедет позже','forecast':'Прогноз спроса','safety':'Страховой запас','daily':'Спрос в день','growth':'Тренд, %','season':'Сезонный коэффициент','excluded':'Исключено всплесков','lost':'Восстановлено спроса','pack':'Кратность','moq':'Минимальная партия','recommended':'Рекомендация','status':'Статус','reason':'Обоснование','stockout_mode':'Оценка отсутствия'}
 LABELS.update(method='Выбранный метод',demand_type='Характер спроса',cv_months='Месяцев внутренней проверки',cv_wape='Внутренняя ошибка, %',stress_recommended='Заказ в стресс-сценарии',first_shortage='Первый риск дефицита',source_growth_percent='Рост из сводки, %',quantity='К заказу',calculated_at='Дата расчёта',planning_method='Метод расчёта')
+LABELS.update(source_growth='Прирост поставщика, доля',growth_source='Источник прироста',unknown_transit='Путь с неясной датой')
 
 def export_excel(frame, cfg):
     buffer=BytesIO()
@@ -70,14 +71,14 @@ with st.sidebar:
     st.caption('Расчёт выполняется локально. API-ключи и платные подписки не нужны.')
 
 st.markdown('<div class="eyebrow">AXIOMA / INVENTORY INTELLIGENCE</div>',unsafe_allow_html=True)
-st.title('Заказывайте то, что нужно.')
+st.title('Заказы поставщикам')
 st.markdown('<div class="intro">Продажи, склад и ожидаемые поставки — в одном расчёте. Каждая рекомендация сопровождается понятным объяснением.</div>',unsafe_allow_html=True)
 
 if mode=='Показать пример':
     ds=deepcopy(load_demo())
     st.info('Демонстрационный набор: 6 товаров, сезонность, рост, разовая покупка на 1 500 единиц и известный период отсутствия товара. Это синтетические данные.')
 else:
-    uploaded=st.file_uploader('Загрузите все 6 Excel-файлов выбранного поставщика',type=['xlsx'],accept_multiple_files=True)
+    uploaded=st.file_uploader('Загрузите ZIP-архив или все 6 Excel-файлов выбранного поставщика',type=['xlsx','zip'],accept_multiple_files=True)
     local_root=os.environ.get('AXIOMA_DATA_DIR')
     local_files=[]
     if local_root:
@@ -85,7 +86,13 @@ else:
         if folder.is_dir():
             if st.button('Открыть предоставленные локальные файлы',type='primary'):st.session_state['local_supplier']=supplier
             if st.session_state.get('local_supplier')==supplier:local_files=[(p.name,p.read_bytes()) for p in sorted(folder.glob('*.xlsx'))]
-    inputs=[(f.name,f.getvalue()) for f in uploaded] or local_files
+    inputs=[]
+    try:
+        for f in uploaded:
+            inputs.extend(unpack_excel_archive(f.getvalue()) if f.name.lower().endswith('.zip') else [(f.name,f.getvalue())])
+        if len({name for name,_ in inputs})!=len(inputs):raise ValueError('Один файл загружен несколько раз; оставьте архив или отдельные XLSX')
+    except Exception as exc:st.error(f'Архив не прочитан: {exc}');st.stop()
+    inputs=inputs or local_files
     if not inputs:
         st.markdown('**Начните с примера слева или выберите файлы выше.** После загрузки здесь появятся рекомендации.')
         st.stop()
@@ -113,7 +120,7 @@ with st.expander('Данные и допущения · проверить пе�
             base.update(extra[[c for c in ['stock','category','pack','moq'] if c in extra]])
             ds.products=base.reset_index();st.caption(f'Обновлено {len(base.index.intersection(extra.index))} товаров; не найдено {len(extra.index.difference(base.index))}.')
         except Exception as exc:st.error(f'CSV не применён: {exc}')
-    changed=st.data_editor(ds.products.rename(columns=LABELS),disabled=['Код 1С','Артикул','Товар','Ед.'],hide_index=True,width='stretch',key=f'products-{mode}-{supplier}',column_config={'Свободный остаток':st.column_config.NumberColumn(min_value=0),'Кратность':st.column_config.NumberColumn(min_value=1),'Минимальная партия':st.column_config.NumberColumn(min_value=1)})
+    changed=st.data_editor(ds.products.rename(columns=LABELS),disabled=['Код 1С','Артикул','Товар','Ед.'],hide_index=True,width='stretch',key=f'products-{mode}-{supplier}',column_config={'Свободный остаток':st.column_config.NumberColumn(min_value=0),'Кратность':st.column_config.NumberColumn(min_value=1),'Минимальная партия':st.column_config.NumberColumn(min_value=1),'Прирост поставщика, доля':st.column_config.NumberColumn(min_value=-.9,max_value=3.,help='0.2 означает +20%. Если задан, заменяет тренд из истории.')})
     ds.products=changed.rename(columns={v:k for k,v in LABELS.items()})
     st.caption('CSV отсутствия товара: sku,start,end, даты YYYY-MM-DD. Оба конца периода включены.')
     stockout_file=st.file_uploader('Подтверждённые периоды отсутствия',type=['csv'])
@@ -163,15 +170,15 @@ with orders_tab:
     if search:selected=selected[selected[['sku','article','name']].astype(str).apply(lambda s:s.str.contains(search,case=False,regex=False)).any(axis=1)]
     chosen_categories=st.multiselect('Категории',categories)
     if chosen_categories:selected=selected[selected.category.astype(str).isin(chosen_categories)]
-    columns=['stock_basis','status','first_shortage','sku','article','name','unit','stock','stock_threshold','in_transit','forecast','recommended','method','demand_type']
+    columns=['status','sku','name','recommended','unit','first_shortage','stock','in_transit','forecast','stock_threshold','method','demand_type','stock_basis','article']
     st.dataframe(selected[[c for c in columns if c in selected]].rename(columns=LABELS),hide_index=True,width='stretch')
     st.download_button('Скачать все рекомендации · Excel',export_excel(result,cfg),file_name=f'axioma-{as_of}.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     with st.expander('Проверить и утвердить заказ'):
         draft=result[result.recommended.gt(0)].copy()
         if draft.empty:st.info('Нет положительных рекомендаций для утверждения.')
         else:
-            draft=draft[[c for c in ['sku','article','name','supplier','recommended','pack','moq','stock_basis','snapshot_date'] if c in draft]].copy();draft['Утвердить']=False;draft['К заказу']=draft.recommended
-            reviewed=st.data_editor(draft.rename(columns=LABELS),hide_index=True,disabled=['Код 1С','Артикул','Товар','Поставщик','Рекомендация','Кратность','Минимальная партия','Основание остатка','Дата снимка'],column_config={'К заказу':st.column_config.NumberColumn(min_value=0)},key=f'approval-{mode}-{supplier}')
+            draft=draft[[c for c in ['sku','article','name','supplier','unit','recommended','pack','moq','stock_basis','snapshot_date','reason'] if c in draft]].copy();draft['Утвердить']=False;draft['К заказу']=draft.recommended
+            reviewed=st.data_editor(draft.rename(columns=LABELS),hide_index=True,disabled=['Код 1С','Артикул','Товар','Поставщик','Ед.','Рекомендация','Кратность','Минимальная партия','Основание остатка','Дата снимка','Обоснование'],column_config={'К заказу':st.column_config.NumberColumn(min_value=0)},key=f'approval-{mode}-{supplier}')
             approved=reviewed[reviewed['Утвердить']&reviewed['К заказу'].gt(0)]
             bad=approved[(approved['К заказу']<approved['Минимальная партия'])|~np.isclose(approved['К заказу']%approved['Кратность'],0)]
             if len(bad):st.error('Исправьте количество: оно должно соответствовать минимуму и кратности.')
@@ -180,7 +187,6 @@ with orders_tab:
             if st.button('Добавить утверждённые позиции в общую корзину',disabled=approved.empty or not bad.empty or not acknowledge):
                 lines=approved.rename(columns={v:k for k,v in LABELS.items()}).copy()
                 lines=lines.drop(columns=['Утвердить'],errors='ignore')
-                lines=lines.merge(result[['supplier','sku','reason']],on=['supplier','sku'],validate='one_to_one')
                 lines['calculated_at']=str(as_of);lines['planning_method']=method
                 st.session_state['order_cart']=add_reviewed_lines(st.session_state.get('order_cart',pd.DataFrame()),lines)
                 st.success(f'Добавлено {len(lines)} позиций. Теперь можно рассчитать другого поставщика.')
@@ -234,6 +240,17 @@ with quality_tab:
     st.caption('Прототип HackAlem AI · AI-агент Codex использован при разработке. Расчёт детерминированный; внешние AI API не вызываются.')
 
 with comparison_tab:
+    import json
+    published=[]
+    for report_name in ['benchmark-systeme.json','benchmark-iek.json']:
+        report_path=Path(__file__).parent/'docs'/report_name
+        if report_path.exists():
+            report=json.loads(report_path.read_text(encoding='utf-8'))
+            published.append({'Поставщик':report['supplier'],'Проверено товаров':report['evaluated_skus'],'С положительным фактом':report['scored_skus'],'Ошибка исходной модели, %':round(report['macro_wape_model'],2),'Ошибка среднего, %':round(report['macro_wape_baseline'],2),'Ошибка общей ML-модели, %':round(report['macro_wape_pooled'],2)})
+    if published:
+        st.subheader('Сохранённая проверка полного подходящего каталога')
+        st.dataframe(pd.DataFrame(published),hide_index=True,width='stretch')
+        st.caption('Июнь–август 2026. Каждый прогноз обучен на предшествующей истории. Это сохранённый протокол, а не результат текущих настроек. Средняя WAPE считается по товарам с положительным фактом; ошибки могут превышать 100%. Ограниченные выборки использовались при разработке, поэтому для независимого подтверждения нужен новый период. Учёт товаров с нулевыми продажами и точные команды — в docs/validation.md.')
     st.subheader('Что меняет обработка спроса')
     st.write('Сравните три расчёта на одинаковых товарах, остатках и сроках: обычное среднее за 6 завершённых месяцев; текущая модель без удаления всплесков; выбранная вами модель.')
     st.caption('Это сравнение рекомендаций, а не проверка точности на будущих продажах. Меньший заказ сам по себе не доказывает экономию. Количества разных товаров не складываются.')
@@ -257,15 +274,16 @@ with comparison_tab:
     if st.button('Проверить прогноз на истории'):
         from src.validation import backtest
         with st.spinner('Проверяю прогноз без доступа к будущим продажам…'):
-            detail,scores,coverage=backtest(ds,str(as_of))
+            detail,scores,coverage=backtest(ds,str(as_of),include_pooled=True)
         st.write(f"Проверены {coverage['evaluated_skus']} товаров из {coverage['eligible_skus']} подходящих. Месяцы: {', '.join(coverage['months'])}.")
         valid=scores.dropna(subset=['model_wape','baseline_wape'])
         if valid.empty:st.info('Недостаточно наблюдаемых продаж для оценки ошибки.')
         else:
-            c1,c2,c3=st.columns(3)
+            c1,c2,c3,c4=st.columns(4)
             c1.metric('Средняя ошибка Axioma по товарам',f'{valid.model_wape.mean():.1f}%')
             c2.metric('Средняя ошибка обычного среднего',f'{valid.baseline_wape.mean():.1f}%')
             c3.metric('Средняя ошибка автовыбора',f'{valid.adaptive_wape.mean():.1f}%')
+            c4.metric('Средняя ошибка общей ML-модели',f'{valid.pooled_wape.mean():.1f}%')
             st.caption('Для каждого товара WAPE = сумма абсолютных ошибок / сумма факта; затем берём среднее по товарам с положительным фактом. Меньше — лучше, ошибка может быть выше 100%. Это не «процент точности» и не денежная экономия.')
-            st.dataframe(scores.drop(columns=['pooled_wape'],errors='ignore').rename(columns={'sku':'Код 1С','months':'Месяцев','actual_total':'Факт за период','model_wape':'Ошибка исходной модели, %','baseline_wape':'Ошибка среднего, %','adaptive_wape':'Ошибка автовыбора, %'}),hide_index=True,width='stretch')
+            st.dataframe(scores.rename(columns={'sku':'Код 1С','months':'Месяцев','actual_total':'Факт за период','model_wape':'Ошибка исходной модели, %','baseline_wape':'Ошибка среднего, %','adaptive_wape':'Ошибка автовыбора, %','pooled_wape':'Ошибка общей ML-модели, %'}),hide_index=True,width='stretch')
             st.download_button('Скачать результаты проверки',export_excel(detail.rename(columns={'month':'Месяц','actual':'Факт','model':'Прогноз Axioma','baseline':'Прогноз среднего'}),cfg),file_name='axioma-validation.xlsx')

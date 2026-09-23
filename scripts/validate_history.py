@@ -1,0 +1,19 @@
+"""Run historical evaluation; raw private files are read locally only."""
+import argparse
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from src.data import demo_data,parse_files
+from src.validation import backtest
+
+parser=argparse.ArgumentParser()
+parser.add_argument('--folder',type=Path)
+parser.add_argument('--supplier',default='Демо')
+parser.add_argument('--limit',type=int,default=30)
+args=parser.parse_args()
+ds=parse_files([(p.name,p.read_bytes()) for p in sorted(args.folder.glob('*.xlsx'))],args.supplier) if args.folder else demo_data()
+detail,scores,meta=backtest(ds,max_skus=args.limit)
+valid=scores.dropna(subset=['model_wape','baseline_wape'])
+meta.update(supplier=args.supplier,scored_skus=len(valid),macro_wape_model=float(valid.model_wape.mean()) if len(valid) else None,macro_wape_baseline=float(valid.baseline_wape.mean()) if len(valid) else None)
+print(json.dumps(meta,ensure_ascii=False,indent=2,allow_nan=False))

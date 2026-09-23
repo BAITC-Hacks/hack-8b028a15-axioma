@@ -73,3 +73,11 @@ def test_client_split_invoices_detected():
 def test_no_future_information():
     d=baseline();d.sales=pd.concat([d.sales,pd.DataFrame([dict(sku='A',date=pd.Timestamp('2027-01-01'),quantity=100000)])])
     assert row(d).recommended==420
+
+
+def test_unknown_stock_still_has_actionable_reorder_threshold():
+    d=baseline(); d.products.loc[0,'stock']=np.nan
+    r=row(d)
+    assert r.stock_threshold==420
+    assert '420.0' in r.reason
+    assert np.isnan(r.recommended)

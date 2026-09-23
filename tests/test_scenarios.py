@@ -44,3 +44,4 @@ def test_no_transactions_does_not_invent_depletion():
     d = source(); d.transactions = d.transactions.iloc[0:0]
     planned, evidence = stock_scenario(d, '2026-09-23', 'depletion')
     assert np.isnan(planned.products.iloc[0].stock)
+

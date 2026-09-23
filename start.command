@@ -5,3 +5,4 @@ if [ ! -x .venv/bin/python ]; then
   .venv/bin/python -m pip install -r requirements.txt || exit 1
 fi
 exec .venv/bin/python -m streamlit run app.py
+

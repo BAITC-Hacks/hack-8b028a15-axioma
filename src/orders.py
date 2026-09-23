@@ -17,3 +17,4 @@ def add_reviewed_lines(cart, lines):
     if lines[['supplier','sku']].isna().any().any():raise ValueError('Не указан поставщик или код товара')
     combined=pd.concat([cart,lines],ignore_index=True) if not cart.empty else lines.copy()
     return combined.drop_duplicates(['supplier','sku'],keep='last').sort_values(['supplier','sku']).reset_index(drop=True)
+

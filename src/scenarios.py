@@ -52,3 +52,4 @@ def annotate_scenario(result, evidence):
     result['stock_basis'] = result.stock_basis.fillna('Остаток из входных данных' )
     result.loc[result.stock.isna(), 'stock_basis'] = 'Неизвестен'
     return result
+

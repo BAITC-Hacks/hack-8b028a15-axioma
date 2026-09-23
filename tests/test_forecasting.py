@@ -48,3 +48,4 @@ def test_stress_scenario_respects_surplus_stock():
     ds.products.stock=100000
     r=calculate(ds,Settings(forecast_method='adaptive'))[0].iloc[0]
     assert r.recommended==0 and r.stress_recommended==0
+

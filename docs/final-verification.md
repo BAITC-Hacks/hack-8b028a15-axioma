@@ -1,3 +1,5 @@
+> Исторический отчёт предыдущего этапа. Актуальная объединённая версия: [release-validation.md](release-validation.md).
+
 # Проверка финальной доработки — 23.09.2026
 
 Среда: macOS, Python 3.14; Streamlit 1.64.0, Pandas 3.0.6, NumPy 2.5.3, OpenPyXL 3.1.5, scikit-learn 1.9.1, pytest 9.1.1.
@@ -28,3 +30,4 @@
 GitHub Actions не стартует из-за ограничения биллинга аккаунта организации. В [запуске 35851022318](https://github.com/BAITC-Hacks/hack-8b028a15-axioma/actions/runs/35851022318) указано: `The job was not started because your account is locked due to a billing issue.` Это внешняя блокировка, а не результат тестов. Успешный запуск CI на Windows/Linux для финальной версии не заявляется. Workflow сохранён; оплата или изменение биллинга не выполнялись.
 
 Два отчёта, различавшиеся только регистром, сохранены как `extended-validation.md` и `extended-progress.md`; основные `validation.md` и `progress.md` восстановлены из Git. Это устраняет столкновение имён на macOS/Windows без потери документов команды.
+

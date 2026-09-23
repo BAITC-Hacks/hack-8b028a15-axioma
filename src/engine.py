@@ -33,6 +33,12 @@ def clean_transactions(tx):
             q1,q3=pos.quantile([.25,.75]); median=float(pos.median())
             threshold=max(5*median,float(q3+3*(q3-q1)),1)
             mask=g.quantity>threshold
+            # Three or more distinct purchase days by a known large client are
+            # treated as recurring demand, not deleted as a one-off project.
+            large=g[mask & g.client_id.fillna('').ne('')]
+            recurring=large.groupby('client_id').day.nunique()
+            recurring=set(recurring[recurring>=3].index)
+            mask &= ~g.client_id.isin(recurring)
             for _,r in g[mask].iterrows():out.append(dict(sku=sku,date=r.day,document=r.document,original=r.quantity,regular=median,excluded=r.quantity-median,reason='Крупная разовая накладная'))
             g.loc[mask,'quantity']=median
             # Catch one large client-day split into many smaller invoices.
@@ -42,7 +48,9 @@ def clean_transactions(tx):
                 positive=cg[cg>0]
                 if len(positive)>=8:
                     a,b=positive.quantile([.25,.75]); med=float(positive.median()); cap=max(5*med,float(b+3*(b-a)),1)
+                    counts=cg[cg>cap].reset_index().groupby('client_id').day.nunique()
                     for (client,day),qty in cg[cg>cap].items():
+                        if counts.get(client,0)>=3:continue
                         ix=g.client_id.eq(client)&g.day.eq(day)&g.quantity.gt(0)
                         total=g.loc[ix,'quantity'].sum()
                         if total>0:
@@ -54,21 +62,35 @@ def clean_transactions(tx):
 
 def calculate(ds: Dataset, settings: Settings):
     cfg=settings; asof=pd.Timestamp(cfg.as_of).normalize(); cutoff=asof.replace(day=1)
+    for name,low,high in [('lead_days',1,365),('review_days',1,90),('safety_days',0,90),('growth_percent',-50,100)]:
+        value=getattr(cfg,name)
+        if not np.isfinite(value) or value<low or value>high:raise ValueError(f'Недопустимый параметр: {name}')
+    if any(not np.isfinite(v) or v<0 or v>5 for v in cfg.category_factors.values()):raise ValueError('Множитель категории должен быть от 0 до 5')
     raw=ds.sales.copy()
     tx=ds.transactions.copy()
     if not tx.empty:
-        tx=tx[tx.date<asof].copy()
+        tx=tx[tx.date<cutoff].copy() # Incomplete month must not affect historical outlier thresholds.
         cleaned,anomalies=clean_transactions(tx)
         raw_tx=tx.assign(date=tx.date.dt.to_period('M').dt.to_timestamp()).groupby(['sku','date']).quantity.sum()
         clean_tx=cleaned.assign(date=cleaned.date.dt.to_period('M').dt.to_timestamp()).groupby(['sku','date']).quantity.sum()
         removed=(raw_tx-clean_tx).clip(lower=0)
-        if raw.empty:raw=raw_tx.reset_index()
+        # Fill only missing SKU/month keys; never add duplicate monthly representations.
+        detailed=raw_tx.reset_index()
+        if raw.empty:raw=detailed
+        else:
+            known=pd.MultiIndex.from_frame(raw[['sku','date']])
+            missing=~pd.MultiIndex.from_frame(detailed[['sku','date']]).isin(known)
+            raw=pd.concat([raw,detailed.loc[missing]],ignore_index=True)
     else:removed=pd.Series(dtype=float); anomalies=pd.DataFrame()
     raw=raw[raw.date<cutoff].copy() # Do not use the incomplete current month.
     histories={}; results=[]
+    sales_by_sku={k:g for k,g in raw.groupby('sku')}
+    transit_by_sku={k:g for k,g in ds.transit.groupby('sku')} if not ds.transit.empty else {}
+    stocks_by_sku={k:g for k,g in ds.stocks.groupby('sku')} if not ds.stocks.empty else {}
+    stockouts_by_sku={k:g for k,g in ds.stockouts.groupby('sku')} if not ds.stockouts.empty else {}
     for _,p in ds.products.iterrows():
         sku=p.sku
-        s=raw[raw.sku==sku].groupby('date').quantity.sum().sort_index()
+        s=sales_by_sku.get(sku,raw.iloc[:0]).groupby('date').quantity.sum().sort_index()
         if s.empty:
             results.append(dict(sku=sku,article=p.article,name=p['name'],category=str(p.category),supplier=ds.supplier,stock=p.stock,recommended=np.nan,status='Нет истории',reason='Нет завершённых месяцев продаж. Нужна ручная оценка.'));continue
         full=pd.date_range(s.index.min(),cutoff-pd.offsets.MonthBegin(1),freq='MS')
@@ -88,9 +110,9 @@ def calculate(ds: Dataset, settings: Settings):
                         if regular.loc[dt]>5*baseline:
                             excluded+=regular.loc[dt]-baseline;regular.loc[dt]=baseline
         corrected=regular.copy(); lost=0.; stockout_mode='Нет подтверждённых периодов'
-        periods=ds.stockouts[ds.stockouts.sku==sku] if not ds.stockouts.empty else ds.stockouts
-        if cfg.compensate_stockout:
-            known=ds.stocks[ds.stocks.sku==sku] if not ds.stocks.empty else ds.stocks
+        periods=stockouts_by_sku.get(sku,ds.stockouts.iloc[:0])
+        if cfg.compensate_stockout and (not periods.empty or cfg.approximate_stockout):
+            known=stocks_by_sku.get(sku,ds.stocks.iloc[:0])
             for dt in full:
                 days=dt.days_in_month; absent=set()
                 for _,r in periods.iterrows():
@@ -128,6 +150,11 @@ def calculate(ds: Dataset, settings: Settings):
         if cfg.trend and len(deseasonal)>=6:
             old=float(deseasonal.iloc[-6:-3].mean());new=float(deseasonal.iloc[-3:].mean())
             if old>0: growth=float(np.clip(new/old-1,-.5,1))
+        # Supplied planning growth takes precedence, rather than multiplying two trends.
+        source_growth=number(p.get('source_growth'),np.nan)
+        growth_source='История продаж'
+        if cfg.trend and np.isfinite(source_growth):
+            growth=float(np.clip(source_growth,-.9,3));growth_source='Коэффициент поставщика'
         horizon=cfg.lead_days+cfg.review_days
         future=pd.date_range(asof,periods=horizon)
         future_season=float(np.mean([factors[d.month] for d in future]))
@@ -135,7 +162,7 @@ def calculate(ds: Dataset, settings: Settings):
         forecast=rate*horizon
         cat=float(cfg.category_factors.get(str(p.category),1))
         safety=rate*cfg.safety_days*cat
-        arriving=ds.transit[ds.transit.sku==sku] if not ds.transit.empty else ds.transit
+        arriving=transit_by_sku.get(sku,ds.transit.iloc[:0])
         due=0.; late=0.; unknown_eta=0.
         if not arriving.empty:
             within=arriving.eta.notna()&arriving.eta.ge(asof)&arriving.eta.lt(asof+pd.Timedelta(days=horizon))
@@ -156,6 +183,6 @@ def calculate(ds: Dataset, settings: Settings):
         reason=(f'Спрос {forecast:.1f} + страховой запас {safety:.1f} − свободный остаток {stock:.1f} − поступления {due:.1f}. '
                 f'Минимум {moq:g}, кратность {pack:g}. Исключено разовых продаж: {excluded:.1f}; восстановлено спроса: {lost:.1f}.') if np.isfinite(stock) else 'Введите актуальный свободный остаток. Он не подменён нулём.'
         if unknown_eta:reason+=f' Требуют уточнения даты поступления: {unknown_eta:g} ед.'
-        results.append(dict(sku=sku,article=p.article,name=p['name'],category=str(p.category),supplier=ds.supplier,unit=p.unit,stock=stock,in_transit=due,late_transit=late,forecast=round(forecast,2),safety=round(safety,2),daily=round(rate,3),growth=round(growth*100,1),season=round(future_season,3),excluded=round(excluded,2),lost=round(lost,2),pack=pack,moq=moq,recommended=order,status=status,stockout_mode=stockout_mode,reason=reason))
+        results.append(dict(sku=sku,article=p.article,name=p['name'],category=str(p.category),supplier=ds.supplier,unit=p.unit,stock=stock,in_transit=due,late_transit=late,unknown_transit=unknown_eta,forecast=round(forecast,2),safety=round(safety,2),daily=round(rate,3),growth=round(growth*100,1),growth_source=growth_source,season=round(future_season,3),excluded=round(excluded,2),lost=round(lost,2),pack=pack,moq=moq,recommended=order,status=status,stockout_mode=stockout_mode,reason=reason))
         histories[sku]=pd.DataFrame({'Дата':full,'Продажи':s.values,'Без всплесков':regular.values,'С учётом отсутствия':corrected.values})
     return pd.DataFrame(results),histories,anomalies

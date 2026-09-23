@@ -6,7 +6,7 @@ import os
 import numpy as np
 import pandas as pd
 import streamlit as st
-from src.data import demo_data, parse_files
+from src.data import demo_data, parse_files, unpack_excel_archive
 from src.engine import Settings, calculate
 
 st.set_page_config(page_title='Axioma · Закупки',page_icon='◈',layout='wide')
@@ -26,6 +26,7 @@ def load_files(files,supplier):return parse_files(files,supplier)
 def run(ds,cfg):return calculate(ds,cfg)
 
 LABELS={'sku':'Код 1С','article':'Артикул','name':'Товар','category':'Категория','supplier':'Поставщик','unit':'Ед.','stock':'Свободный остаток','in_transit':'Приедет в период','late_transit':'Приедет позже','forecast':'Прогноз спроса','safety':'Страховой запас','daily':'Спрос в день','growth':'Тренд, %','season':'Сезонный коэффициент','excluded':'Исключено всплесков','lost':'Восстановлено спроса','pack':'Кратность','moq':'Минимальная партия','recommended':'Рекомендация','status':'Статус','reason':'Обоснование','stockout_mode':'Оценка отсутствия'}
+LABELS.update({'source_growth':'Прирост поставщика, доля','growth_source':'Источник прироста','unknown_transit':'Путь с неясной датой'})
 
 def export_excel(frame, cfg):
     buffer=BytesIO()
@@ -70,7 +71,7 @@ if mode=='Показать пример':
     ds=deepcopy(load_demo())
     st.info('Демонстрационный набор: 6 товаров, сезонность, рост, разовая покупка на 1 500 единиц и известный период отсутствия товара. Это синтетические данные.')
 else:
-    uploaded=st.file_uploader('Загрузите все 6 Excel-файлов выбранного поставщика',type=['xlsx'],accept_multiple_files=True)
+    uploaded=st.file_uploader('Загрузите ZIP-архив или все 6 Excel-файлов выбранного поставщика',type=['xlsx','zip'],accept_multiple_files=True)
     local_root=os.environ.get('AXIOMA_DATA_DIR')
     local_files=[]
     if local_root:
@@ -78,7 +79,13 @@ else:
         if folder.is_dir():
             if st.button('Открыть предоставленные локальные файлы',type='primary'):st.session_state['local_supplier']=supplier
             if st.session_state.get('local_supplier')==supplier:local_files=[(p.name,p.read_bytes()) for p in sorted(folder.glob('*.xlsx'))]
-    inputs=[(f.name,f.getvalue()) for f in uploaded] or local_files
+    inputs=[]
+    try:
+        for f in uploaded:
+            inputs.extend(unpack_excel_archive(f.getvalue()) if f.name.lower().endswith('.zip') else [(f.name,f.getvalue())])
+        if len({name for name,_ in inputs})!=len(inputs):raise ValueError('Один файл загружен несколько раз; оставьте архив или отдельные XLSX')
+    except Exception as exc:st.error(f'Архив не прочитан: {exc}');st.stop()
+    inputs=inputs or local_files
     if not inputs:
         st.markdown('**Начните с примера слева или выберите файлы выше.** После загрузки здесь появятся рекомендации.')
         st.stop()
@@ -106,7 +113,7 @@ with st.expander('Данные и допущения · проверить пе�
             base.update(extra[[c for c in ['stock','category','pack','moq'] if c in extra]])
             ds.products=base.reset_index();st.caption(f'Обновлено {len(base.index.intersection(extra.index))} товаров; не найдено {len(extra.index.difference(base.index))}.')
         except Exception as exc:st.error(f'CSV не применён: {exc}')
-    changed=st.data_editor(ds.products.rename(columns=LABELS),disabled=['Код 1С','Артикул','Товар','Ед.'],hide_index=True,width='stretch',key=f'products-{mode}-{supplier}',column_config={'Свободный остаток':st.column_config.NumberColumn(min_value=0),'Кратность':st.column_config.NumberColumn(min_value=1),'Минимальная партия':st.column_config.NumberColumn(min_value=1)})
+    changed=st.data_editor(ds.products.rename(columns=LABELS),disabled=['Код 1С','Артикул','Товар','Ед.'],hide_index=True,width='stretch',key=f'products-{mode}-{supplier}',column_config={'Свободный остаток':st.column_config.NumberColumn(min_value=0),'Кратность':st.column_config.NumberColumn(min_value=1),'Минимальная партия':st.column_config.NumberColumn(min_value=1),'Прирост поставщика, доля':st.column_config.NumberColumn(min_value=-.9,max_value=3.,help='0.2 означает +20%. Если задан, заменяет тренд из истории.')})
     ds.products=changed.rename(columns={v:k for k,v in LABELS.items()})
     st.caption('CSV отсутствия товара: sku,start,end, даты YYYY-MM-DD. Оба конца периода включены.')
     stockout_file=st.file_uploader('Подтверждённые периоды отсутствия',type=['csv'])
@@ -163,7 +170,7 @@ with detail_tab:
         st.line_chart(histories[sku].set_index('Дата'),color=['#94A3B8','#0D9488','#F59E0B'])
         st.caption('Серый — фактические продажи; зелёный — без разовых всплесков; оранжевый — с компенсацией отсутствия товара.')
         st.write('Оценка отсутствия:',row.stockout_mode)
-        st.caption('Тренд ограничен диапазоном −50…+100%. Прогноз является оценкой, а не гарантией продаж.')
+        st.caption(f'Источник прироста: {row.growth_source}. Исторический тренд ограничен −50…+100%; переданный коэффициент поставщика имеет приоритет. Прогноз является оценкой.')
 with quality_tab:
     st.subheader('Прозрачный расчёт')
     st.write('Заказ = прогноз на срок поставки и интервал пересмотра + страховой запас − свободный остаток − поступления в этот период. Положительный результат округляется с учётом минимума и кратности.')

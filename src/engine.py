@@ -1,5 +1,5 @@
 """Deterministic, inspectable inventory policy. No network or model calls."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import math
 import numpy as np
 import pandas as pd
@@ -55,8 +55,13 @@ def clean_transactions(tx):
     result=pd.concat(groups,ignore_index=True).rename(columns={'day':'date'})
     return result,pd.DataFrame(out)
 
-def calculate(ds: Dataset, settings: Settings):
+def calculate(ds: Dataset, settings: Settings, _pooled=None):
     cfg=settings; asof=pd.Timestamp(cfg.as_of).normalize(); cutoff=asof.replace(day=1)
+    if cfg.forecast_method=='pooled' and _pooled is None:
+        from .pooled import pooled_forecasts
+        _,prepared,_=calculate(ds,replace(cfg,forecast_method='legacy'))
+        future=pd.date_range(asof,periods=cfg.lead_days+cfg.review_days)
+        _pooled=pooled_forecasts(prepared,future,cfg.seasonality,cfg.trend and not cfg.use_source_growth,ds.seasonal)
     raw=ds.sales.copy()
     tx=ds.transactions.copy()
     if not tx.empty:
@@ -146,12 +151,15 @@ def calculate(ds: Dataset, settings: Settings):
         model_info=dict(method='Эвристическая модель',demand_type='Не классифицирован',cv_months=0,cv_wape=np.nan,stress_daily=0.,candidates=[])
         source_growth=number(p.get('source_growth_percent',np.nan),np.nan)
         has_source_growth=cfg.use_source_growth and np.isfinite(source_growth)
-        if cfg.forecast_method=='adaptive':
+        if cfg.forecast_method in ('adaptive','pooled'):
             daily_rates,model_info=adaptive_forecast(corrected,future,cfg.seasonality,cfg.trend and not has_source_growth,ds.seasonal)
+            if cfg.forecast_method=='pooled' and sku in (_pooled or {}):
+                daily_rates=_pooled[sku].copy()
+                model_info.update(method='Общая модель HistGradientBoosting + среднее',cv_months=0,cv_wape=np.nan,stress_daily=0.,candidates=[])
             daily_rates*=max(0,1+cfg.growth_percent/100)
             growth=0.  # Selected methods carry their own level/trend; never multiply it twice.
         if has_source_growth:
-            if cfg.forecast_method!='adaptive':daily_rates/=1+growth
+            if cfg.forecast_method not in ('adaptive','pooled'):daily_rates/=1+growth
             daily_rates*=max(0,1+source_growth/100)
             growth=source_growth/100
         rate=float(daily_rates.mean())
@@ -181,7 +189,7 @@ def calculate(ds: Dataset, settings: Settings):
         reason=(f'Спрос {forecast:.1f} + страховой запас {safety:.1f} − свободный остаток {stock:.1f} − поступления {due:.1f}. '
                 f'Минимум {moq:g}, кратность {pack:g}. Исключено разовых продаж: {excluded:.1f}; восстановлено спроса: {lost:.1f}.') if np.isfinite(stock) else f'Текущий остаток неизвестен. При остатке ниже {max(0,forecast+safety-due):.1f} ед. по этой модели нужно пополнение. Количество рассчитывается после выбора сценария или ввода остатка.'
         if unknown_eta:reason+=f' Требуют уточнения даты поступления: {unknown_eta:g} ед.'
-        if cfg.forecast_method=='adaptive':reason+=f' Метод: {model_info["method"]}; внутренних проверочных месяцев: {model_info["cv_months"]}.'
+        if cfg.forecast_method in ('adaptive','pooled'):reason+=f' Метод: {model_info["method"]}; внутренних проверочных месяцев: {model_info["cv_months"]}.'
         if has_source_growth:reason+=f' Рост из сводки {source_growth:g}% применён вместо тренда истории.'
         results.append(dict(sku=sku,article=p.article,name=p['name'],category=str(p.category),supplier=ds.supplier,unit=p.unit,stock=stock,stock_threshold=round(max(0,forecast+safety-due),2),in_transit=due,late_transit=late,forecast=round(forecast,2),safety=round(safety,2),daily=round(rate,3),growth=round(growth*100,1),season=round(future_season,3),excluded=round(excluded,2),lost=round(lost,2),pack=pack,moq=moq,recommended=order,status=status,stockout_mode=stockout_mode,reason=reason))
         histories[sku]=pd.DataFrame({'Дата':full,'Продажи':s.values,'Без всплесков':regular.values,'С учётом отсутствия':corrected.values})

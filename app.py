@@ -10,6 +10,7 @@ import streamlit as st
 from src.data import demo_data, parse_files
 from src.engine import Settings, calculate
 from src.scenarios import stock_scenario, annotate_scenario
+from src.orders import add_reviewed_lines
 
 st.set_page_config(page_title='Axioma · Закупки',page_icon='◈',layout='wide')
 st.markdown('''<style>
@@ -28,6 +29,7 @@ def load_files(files,supplier):return parse_files(files,supplier)
 def run(ds,cfg):return calculate(ds,cfg)
 
 LABELS={'stock_threshold':'Порог пополнения','stock_basis':'Основание остатка','snapshot_date':'Дата снимка','snapshot_stock':'Остаток в снимке','recorded_sales':'Продажи после снимка','scenario_stock':'Сценарный остаток','snapshot_age_days':'Возраст снимка, дней','sku':'Код 1С','article':'Артикул','name':'Товар','category':'Категория','supplier':'Поставщик','unit':'Ед.','stock':'Свободный остаток','in_transit':'Приедет в период','late_transit':'Приедет позже','forecast':'Прогноз спроса','safety':'Страховой запас','daily':'Спрос в день','growth':'Тренд, %','season':'Сезонный коэффициент','excluded':'Исключено всплесков','lost':'Восстановлено спроса','pack':'Кратность','moq':'Минимальная партия','recommended':'Рекомендация','status':'Статус','reason':'Обоснование','stockout_mode':'Оценка отсутствия'}
+LABELS.update(method='Выбранный метод',demand_type='Характер спроса',cv_months='Месяцев внутренней проверки',cv_wape='Внутренняя ошибка, %',stress_recommended='Заказ в стресс-сценарии',first_shortage='Первый риск дефицита',source_growth_percent='Рост из сводки, %',quantity='К заказу',calculated_at='Дата расчёта',planning_method='Метод расчёта')
 
 def export_excel(frame, cfg):
     buffer=BytesIO()
@@ -37,7 +39,8 @@ def export_excel(frame, cfg):
         safe[col]=safe[col].map(lambda x:"'"+x if isinstance(x,str) and x.startswith(('=','+','-','@')) else x)
     with pd.ExcelWriter(buffer,engine='openpyxl') as writer:
         safe.to_excel(writer,index=False,sheet_name='Рекомендации')
-        pd.DataFrame([{'Параметр':k,'Значение':str(v)} for k,v in vars(cfg).items()]).to_excel(writer,index=False,sheet_name='Параметры')
+        parameters=cfg if isinstance(cfg,dict) else vars(cfg)
+        pd.DataFrame([{'Параметр':k,'Значение':str(v)} for k,v in parameters.items()]).to_excel(writer,index=False,sheet_name='Параметры')
         ws=writer.sheets['Рекомендации'];ws.freeze_panes='A2';ws.auto_filter.ref=ws.dimensions
         from openpyxl.styles import Font, PatternFill
         for cell in ws[1]:cell.font=Font(bold=True,color='FFFFFF');cell.fill=PatternFill('solid',fgColor='0D9488')
@@ -57,7 +60,8 @@ with st.sidebar:
     safety=st.number_input('Страховой запас, дней',min_value=0,max_value=90,value=7)
     growth=st.slider('Дополнительный прогноз прироста, %',-50,100,0,help='Ручной сценарий поверх тренда, оценённого по истории.')
     st.divider()
-    method=st.selectbox('Метод расчёта',['Axioma: настроенная модель','Обычное среднее за 6 месяцев'],help='Проверяйте оба метода на истории. Среднее отключает очистку всплесков, сезонность, тренд и восстановление спроса; ручной прирост и параметры запаса сохраняются.')
+    method=st.selectbox('Метод расчёта',['Общая ML-модель','Автовыбор по истории','Axioma: настроенная модель','Обычное среднее за 6 месяцев'],help='Общая модель обучается на прошлых месяцах всех загруженных товаров. При менее 200 обучающих примерах применяется статистический автовыбор. Автовыбор сравнивает методы на шести доступных месяцах внутри истории. Независимая проверка выполняется отдельно.')
+    source_growth=st.checkbox('Применить рост из сводки вместо тренда',False,help='Поле «Кэф. Роста» импортируется как доля изменения: 0,2 означает +20%. Это явный сценарий менеджера; подтвердите смысл коэффициента у владельца данных.')
     remove=st.toggle('Исключать разовые всплески',True)
     seasonal=st.toggle('Учитывать сезонность',True)
     trend=st.toggle('Учитывать устойчивый рост',True)
@@ -138,6 +142,7 @@ if ds.products.stock.isna().any() and not ds.stocks.empty:
             st.dataframe(stock_evidence.rename(columns=LABELS),hide_index=True,width='stretch')
 
 cfg=Settings(str(as_of),int(lead),int(review),int(safety),float(growth),remove,seasonal,trend,compensate,approx,category_factors)
+cfg=replace(cfg,forecast_method={'Автовыбор по истории':'adaptive','Общая ML-модель':'pooled'}.get(method,'legacy'),use_source_growth=source_growth)
 if method=='Обычное среднее за 6 месяцев':
     cfg=replace(cfg,remove_outliers=False,seasonality=False,trend=False,compensate_stockout=False)
     st.info('Выбрано обычное среднее. Переключатели очистки, сезонности, тренда и восстановления спроса не применяются. Ручной прирост и параметры запаса сохранены.')
@@ -158,7 +163,7 @@ with orders_tab:
     if search:selected=selected[selected[['sku','article','name']].astype(str).apply(lambda s:s.str.contains(search,case=False,regex=False)).any(axis=1)]
     chosen_categories=st.multiselect('Категории',categories)
     if chosen_categories:selected=selected[selected.category.astype(str).isin(chosen_categories)]
-    columns=['stock_basis','status','sku','article','name','stock','stock_threshold','in_transit','forecast','recommended']
+    columns=['stock_basis','status','first_shortage','sku','article','name','unit','stock','stock_threshold','in_transit','forecast','recommended','method','demand_type']
     st.dataframe(selected[[c for c in columns if c in selected]].rename(columns=LABELS),hide_index=True,width='stretch')
     st.download_button('Скачать все рекомендации · Excel',export_excel(result,cfg),file_name=f'axioma-{as_of}.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     with st.expander('Проверить и утвердить заказ'):
@@ -172,16 +177,52 @@ with orders_tab:
             if len(bad):st.error('Исправьте количество: оно должно соответствовать минимуму и кратности.')
             acknowledge=True if stock_evidence.empty else st.checkbox('Понимаю: это сценарный заказ с предполагаемыми остатками')
             st.download_button('Скачать утверждённые позиции',export_excel(approved,cfg),file_name='axioma-approved.xlsx',disabled=approved.empty or not bad.empty or not acknowledge)
+            if st.button('Добавить утверждённые позиции в общую корзину',disabled=approved.empty or not bad.empty or not acknowledge):
+                lines=approved.rename(columns={v:k for k,v in LABELS.items()}).copy()
+                lines=lines.drop(columns=['Утвердить'],errors='ignore')
+                lines=lines.merge(result[['supplier','sku','reason']],on=['supplier','sku'],validate='one_to_one')
+                lines['calculated_at']=str(as_of);lines['planning_method']=method
+                st.session_state['order_cart']=add_reviewed_lines(st.session_state.get('order_cart',pd.DataFrame()),lines)
+                st.success(f'Добавлено {len(lines)} позиций. Теперь можно рассчитать другого поставщика.')
             st.caption('Скачивание не отправляет заказ поставщику. Утверждение действует в текущей сессии; сохраните файл.')
+    cart=st.session_state.get('order_cart',pd.DataFrame())
+    if not cart.empty:
+        st.subheader('Общая корзина поставщиков')
+        st.caption('Сохранённые утверждения этой сессии. Новые расчёты не меняют их автоматически: повторное добавление заменяет строку того же поставщика и товара. Корзина хранит дату и метод каждого расчёта.')
+        for supplier_name,group in cart.groupby('supplier'):
+            with st.expander(f'{supplier_name} · {len(group)} позиций',expanded=True):
+                st.dataframe(group.rename(columns=LABELS),hide_index=True,width='stretch')
+        st.download_button('Скачать общую корзину · Excel',export_excel(cart,{}),file_name='axioma-supplier-orders.xlsx')
+        if st.button('Очистить корзину этой сессии'):
+            st.session_state['order_cart']=pd.DataFrame();st.rerun()
 with detail_tab:
     sku=st.selectbox('Выберите товар',list(histories),format_func=lambda k:f"{k} · {result.set_index('sku').loc[k,'name']}") if histories else None
     if sku:
         row=result.set_index('sku').loc[sku];st.subheader(row['name']);st.write(row.reason)
-        c1,c2,c3=st.columns(3);c1.metric('Сезонный коэффициент',row.season);c2.metric('Тренд',f'{row.growth:g}%');c3.metric('Восстановлено спроса',row.lost)
+        c1,c2,c3=st.columns(3);c1.metric('Рекомендовано',f'{row.recommended:g}' if pd.notna(row.recommended) else 'Нужен остаток');c2.metric('Порог пополнения',f'{row.stock_threshold:g}');c3.metric('Восстановлено спроса',row.lost)
+        st.write('Метод:',row.method,'· Характер спроса:',row.demand_type)
         st.line_chart(histories[sku].set_index('Дата'),color=['#94A3B8','#0D9488','#F59E0B'])
         st.caption('Серый — фактические продажи; зелёный — без разовых всплесков; оранжевый — с компенсацией отсутствия товара.')
         st.write('Оценка отсутствия:',row.stockout_mode)
-        st.caption('Тренд ограничен диапазоном −50…+100%. Прогноз является оценкой, а не гарантией продаж.')
+        model_info=histories[sku].attrs.get('model_info',{})
+        if model_info.get('candidates'):
+            with st.expander('Почему выбран этот метод'):
+                st.write(f'Сравнение на {row.cv_months:g} последних доступных месяцах внутри истории. Это выбор метода, а не независимая оценка качества. При близкой ошибке усредняются до трёх методов.')
+                st.dataframe(pd.DataFrame(model_info['candidates']).rename(columns={'method':'Метод','mae_daily':'Средняя абсолютная ошибка, ед./день'}),hide_index=True,width='stretch')
+        future_frame=pd.DataFrame(histories[sku].attrs.get('future',[]))
+        if not future_frame.empty and pd.notna(row.stock):
+            future_frame['Дата']=pd.to_datetime(future_frame['Дата'])
+            transit=ds.transit[ds.transit.sku.eq(sku)]
+            arrivals=transit.groupby('eta').quantity.sum() if not transit.empty else pd.Series(dtype=float)
+            future_frame['Ожидаемые поступления']=future_frame['Дата'].map(arrivals).fillna(0).clip(lower=0)
+            future_frame['Без нового заказа']=row.stock+(future_frame['Ожидаемые поступления']-future_frame['Прогноз в день']).cumsum()
+            future_frame['С новым заказом']=future_frame['Без нового заказа']+np.where(future_frame['Дата']>=pd.Timestamp(as_of)+pd.Timedelta(days=lead),row.recommended,0)
+            st.markdown('**Что будет с запасом по дням**')
+            st.line_chart(future_frame.set_index('Дата')[['Без нового заказа','С новым заказом']],color=['#EF4444','#0D9488'])
+            st.caption('Отрицательный баланс показывает неудовлетворённую потребность. Поступления учитываются в начале дня; новый заказ — через заданный срок. Это сценарий по прогнозу, а не фактическое движение склада.')
+            if pd.notna(row.first_shortage):st.warning(f'Риск дефицита с {row.first_shortage}, до прихода нового заказа. Нужна ускоренная поставка или перемещение со склада.')
+            if cfg.forecast_method=='adaptive' and row.cv_months>=3:
+                st.info(f'Стресс-сценарий: {row.stress_recommended:g} ед. к заказу, если спрос превысит прогноз на величину 90-го процентиля прошлых положительных ошибок. Это ориентир для проверки, не гарантированный уровень сервиса.')
 with quality_tab:
     st.subheader('Прозрачный расчёт')
     st.write('Заказ = прогноз на срок поставки и интервал пересмотра + страховой запас − свободный остаток − поступления в этот период. Положительный результат округляется с учётом минимума и кратности.')
@@ -198,7 +239,7 @@ with comparison_tab:
     st.caption('Это сравнение рекомендаций, а не проверка точности на будущих продажах. Меньший заказ сам по себе не доказывает экономию. Количества разных товаров не складываются.')
     if st.button('Рассчитать сравнение'):
         with st.spinner('Сравниваю методы на одинаковых входных данных…'):
-            simple=run(ds,replace(cfg,remove_outliers=False,seasonality=False,trend=False,compensate_stockout=False))[0]
+            simple=run(ds,replace(cfg,forecast_method='legacy',remove_outliers=False,seasonality=False,trend=False,compensate_stockout=False))[0]
             unclean=run(ds,replace(cfg,remove_outliers=False))[0]
         comparison=result[[c for c in ['sku','name','recommended','stock_basis','snapshot_date'] if c in result]].rename(columns={'recommended':'Выбранная модель'})
         comparison=comparison.merge(simple[['sku','recommended']].rename(columns={'recommended':'Обычное среднее'}),on='sku',validate='one_to_one')
@@ -221,9 +262,10 @@ with comparison_tab:
         valid=scores.dropna(subset=['model_wape','baseline_wape'])
         if valid.empty:st.info('Недостаточно наблюдаемых продаж для оценки ошибки.')
         else:
-            c1,c2=st.columns(2)
+            c1,c2,c3=st.columns(3)
             c1.metric('Средняя ошибка Axioma по товарам',f'{valid.model_wape.mean():.1f}%')
             c2.metric('Средняя ошибка обычного среднего',f'{valid.baseline_wape.mean():.1f}%')
+            c3.metric('Средняя ошибка автовыбора',f'{valid.adaptive_wape.mean():.1f}%')
             st.caption('Для каждого товара WAPE = сумма абсолютных ошибок / сумма факта; затем берём среднее по товарам с положительным фактом. Меньше — лучше, ошибка может быть выше 100%. Это не «процент точности» и не денежная экономия.')
-            st.dataframe(scores.rename(columns={'sku':'Код 1С','months':'Месяцев','actual_total':'Факт за период','model_wape':'Ошибка Axioma, %','baseline_wape':'Ошибка среднего, %'}),hide_index=True,width='stretch')
+            st.dataframe(scores.drop(columns=['pooled_wape'],errors='ignore').rename(columns={'sku':'Код 1С','months':'Месяцев','actual_total':'Факт за период','model_wape':'Ошибка исходной модели, %','baseline_wape':'Ошибка среднего, %','adaptive_wape':'Ошибка автовыбора, %'}),hide_index=True,width='stretch')
             st.download_button('Скачать результаты проверки',export_excel(detail.rename(columns={'month':'Месяц','actual':'Факт','model':'Прогноз Axioma','baseline':'Прогноз среднего'}),cfg),file_name='axioma-validation.xlsx')

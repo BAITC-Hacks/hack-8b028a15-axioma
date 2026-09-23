@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+data/private/
+*.xlsx
+*.xls
+.DS_Store
+.streamlit/secrets.toml
+work/

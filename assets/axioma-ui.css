@@ -1,0 +1,129 @@
+/* Presentation only. Keep calculations, widget keys and business rules in Python.
+   Use Streamlit's theme colours; no remote fonts or generated CSS class names. */
+.stApp {
+  --axioma-accent: var(--primary-color, #0d9488);
+  --axioma-ink: var(--text-color, #172b4d);
+  --axioma-surface: var(--secondary-background-color, #fff);
+  --axioma-line: color-mix(in srgb, var(--axioma-ink) 14%, transparent);
+  --axioma-muted: color-mix(in srgb, var(--axioma-ink) 75%, transparent);
+}
+
+.block-container {
+  max-width: 1450px;
+  padding-top: 4rem; /* Keep the title below Streamlit's toolbar. */
+  padding-bottom: 3rem;
+}
+
+[data-testid="stMain"] h1 {
+  font-size: clamp(2rem, 3.3vw, 3.1rem);
+  line-height: 1.15;
+  letter-spacing: -0.045em;
+  font-weight: 750;
+  padding-bottom: 0.65rem;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--axioma-accent);
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.16em;
+  line-height: 1.6;
+  padding-top: 0.35rem;
+}
+
+.eyebrow::before {
+  content: "";
+  width: 0.6rem;
+  height: 0.6rem;
+  flex-shrink: 0;
+  border: 2px solid currentColor;
+  border-radius: 0.15rem;
+}
+
+.intro {
+  max-width: 850px;
+  font-size: 1.08rem;
+  line-height: 1.65;
+  color: var(--axioma-muted);
+  margin-bottom: 1.1rem;
+}
+
+[data-testid="stSidebar"] {
+  border-right: 1px solid var(--axioma-line);
+}
+
+[data-testid="stSidebar"] h2 {
+  letter-spacing: 0.045em;
+  font-size: 1.4rem;
+}
+
+[data-testid="stMetric"] {
+  background: var(--axioma-surface);
+  border: 1px solid var(--axioma-line);
+  border-top: 3px solid color-mix(in srgb, var(--axioma-accent) 65%, transparent);
+  border-radius: 16px;
+  padding: 1.1rem 1.25rem;
+  box-shadow: 0 3px 12px rgb(0 0 0 / 3%);
+  min-width: 0;
+}
+
+[data-testid="stMetricLabel"] {
+  color: var(--axioma-muted);
+}
+
+[data-testid="stMetricValue"] {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+[data-testid="stTabs"] [role="tablist"] {
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+
+[data-testid="stTabs"] [role="tab"] {
+  border-radius: 9px 9px 0 0;
+  padding-inline: 0.9rem;
+}
+
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+  background: color-mix(in srgb, var(--axioma-accent) 9%, transparent);
+}
+
+[data-testid="stExpander"] > details {
+  border-color: var(--axioma-line);
+  border-radius: 12px;
+}
+
+[data-testid="stButton"] button,
+[data-testid="stDownloadButton"] button {
+  border-radius: 9px;
+  min-height: 2.6rem;
+}
+
+[data-testid="stTabs"] [role="tab"]:focus-visible,
+[data-testid="stButton"] button:focus-visible,
+[data-testid="stDownloadButton"] button:focus-visible {
+  outline: 3px solid var(--axioma-accent);
+  outline-offset: 3px;
+}
+
+/* Keep native table scrolling, sidebar collapse and input sizing intact. */
+@media (max-width: 640px) {
+  .block-container {
+    padding-top: 4rem;
+    padding-inline: 1rem;
+  }
+  [data-testid="stMain"] h1 {
+    font-size: 2rem;
+    letter-spacing: -0.035em;
+  }
+  .intro { font-size: 1rem; }
+  .eyebrow { font-size: 0.65rem; letter-spacing: 0.1em; }
+  [data-testid="stMetric"] { padding: 1rem; }
+  [data-testid="stTabs"] [role="tab"] { padding-inline: 0.7rem; }
+}

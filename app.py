@@ -15,13 +15,12 @@ from src.scenarios import stock_scenario, annotate_scenario
 from src.orders import add_reviewed_lines
 
 st.set_page_config(page_title='Axioma · Закупки',page_icon='◈',layout='wide')
-st.markdown('''<style>
-.block-container{padding-top:4rem;max-width:1450px} h1{letter-spacing:-1.5px}
-[data-testid="stMetric"]{background:white;border:1px solid #e3e8ef;border-radius:14px;padding:18px}
-[data-testid="stSidebar"]{border-right:1px solid #e3e8ef}
-.eyebrow{font-size:12px;font-weight:700;letter-spacing:3px;color:#0d9488}
-.intro{font-size:18px;color:#61718a;max-width:850px;margin-bottom:24px}
-</style>''',unsafe_allow_html=True)
+try:
+    dashboard_css=(Path(__file__).resolve().parent/'assets'/'axioma-ui.css').read_text(encoding='utf-8')
+except (OSError,UnicodeError):
+    # An unavailable optional stylesheet must not prevent purchasing calculations.
+    dashboard_css='.block-container{padding-top:4rem;max-width:1450px}'
+st.markdown(f'<style>{dashboard_css}</style>',unsafe_allow_html=True)
 
 @st.cache_data(show_spinner=False)
 def load_demo():return demo_data()

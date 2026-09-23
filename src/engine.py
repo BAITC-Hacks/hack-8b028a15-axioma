@@ -4,6 +4,7 @@ import math
 import numpy as np
 import pandas as pd
 from .data import Dataset, number
+from .forecasting import adaptive_forecast
 
 @dataclass
 class Settings:
@@ -18,6 +19,8 @@ class Settings:
     compensate_stockout: bool = True
     approximate_stockout: bool = False
     category_factors: dict = field(default_factory=dict)
+    forecast_method: str = 'legacy'
+    use_source_growth: bool = False
 
 def clean_transactions(tx):
     if tx.empty:return tx.copy(),pd.DataFrame()
@@ -57,18 +60,25 @@ def calculate(ds: Dataset, settings: Settings):
     raw=ds.sales.copy()
     tx=ds.transactions.copy()
     if not tx.empty:
-        tx=tx[tx.date<asof].copy()
+        # Fit the outlier thresholds on the same completed months as the forecast.
+        tx=tx[tx.date<cutoff].copy()
         cleaned,anomalies=clean_transactions(tx)
         raw_tx=tx.assign(date=tx.date.dt.to_period('M').dt.to_timestamp()).groupby(['sku','date']).quantity.sum()
         clean_tx=cleaned.assign(date=cleaned.date.dt.to_period('M').dt.to_timestamp()).groupby(['sku','date']).quantity.sum()
         removed=(raw_tx-clean_tx).clip(lower=0)
-        if raw.empty:raw=raw_tx.reset_index()
+        # Monthly reports take precedence. Transaction-only products still need
+        # their history when other products have a monthly report.
+        fallback=raw_tx.reset_index()
+        fallback=fallback[~fallback.sku.isin(raw.sku)]
+        if not fallback.empty:
+            raw=fallback if raw.empty else pd.concat([raw,fallback],ignore_index=True)
     else:removed=pd.Series(dtype=float); anomalies=pd.DataFrame()
     raw=raw[raw.date<cutoff].copy() # Do not use the incomplete current month.
+    sales_by_sku={sku:g.groupby('date').quantity.sum().sort_index() for sku,g in raw.groupby('sku')}
     histories={}; results=[]
     for _,p in ds.products.iterrows():
         sku=p.sku
-        s=raw[raw.sku==sku].groupby('date').quantity.sum().sort_index()
+        s=sales_by_sku.get(sku,pd.Series(dtype=float))
         if s.empty:
             results.append(dict(sku=sku,article=p.article,name=p['name'],category=str(p.category),supplier=ds.supplier,stock=p.stock,recommended=np.nan,status='Нет истории',reason='Нет завершённых месяцев продаж. Нужна ручная оценка.'));continue
         full=pd.date_range(s.index.min(),cutoff-pd.offsets.MonthBegin(1),freq='MS')
@@ -132,7 +142,20 @@ def calculate(ds: Dataset, settings: Settings):
         future=pd.date_range(asof,periods=horizon)
         future_season=float(np.mean([factors[d.month] for d in future]))
         rate=max(0,daily*(1+growth)*(1+cfg.growth_percent/100)*future_season)
-        forecast=rate*horizon
+        daily_rates=np.full(horizon,rate)
+        model_info=dict(method='Эвристическая модель',demand_type='Не классифицирован',cv_months=0,cv_wape=np.nan,stress_daily=0.,candidates=[])
+        source_growth=number(p.get('source_growth_percent',np.nan),np.nan)
+        has_source_growth=cfg.use_source_growth and np.isfinite(source_growth)
+        if cfg.forecast_method=='adaptive':
+            daily_rates,model_info=adaptive_forecast(corrected,future,cfg.seasonality,cfg.trend and not has_source_growth,ds.seasonal)
+            daily_rates*=max(0,1+cfg.growth_percent/100)
+            growth=0.  # Selected methods carry their own level/trend; never multiply it twice.
+        if has_source_growth:
+            if cfg.forecast_method!='adaptive':daily_rates/=1+growth
+            daily_rates*=max(0,1+source_growth/100)
+            growth=source_growth/100
+        rate=float(daily_rates.mean())
+        forecast=float(daily_rates.sum())
         cat=float(cfg.category_factors.get(str(p.category),1))
         safety=rate*cfg.safety_days*cat
         arriving=ds.transit[ds.transit.sku==sku] if not ds.transit.empty else ds.transit
@@ -146,16 +169,27 @@ def calculate(ds: Dataset, settings: Settings):
         need=max(0,forecast+safety-stock-due) if np.isfinite(stock) else np.nan
         order=math.ceil(max(need,moq)/pack)*pack if np.isfinite(need) and need>1e-8 else 0 if np.isfinite(need) else np.nan
         # Date-aware deficit before the newly placed order arrives.
-        balance=stock; shortage=False
+        balance=stock; shortage=False; first_shortage=None
         if np.isfinite(stock):
-            for d in pd.date_range(asof,periods=cfg.lead_days):
+            for i,d in enumerate(pd.date_range(asof,periods=cfg.lead_days)):
                 if not arriving.empty:balance+=float(arriving.loc[arriving.eta.eq(d),'quantity'].clip(lower=0).sum())
-                balance-=rate
-                if balance<0:shortage=True
+                balance-=daily_rates[i]
+                if balance<0:
+                    shortage=True
+                    if first_shortage is None:first_shortage=str(d.date())
         status='Нужен остаток' if not np.isfinite(stock) else 'Срочно' if shortage else 'Заказать' if order>0 else 'Достаточно'
         reason=(f'Спрос {forecast:.1f} + страховой запас {safety:.1f} − свободный остаток {stock:.1f} − поступления {due:.1f}. '
                 f'Минимум {moq:g}, кратность {pack:g}. Исключено разовых продаж: {excluded:.1f}; восстановлено спроса: {lost:.1f}.') if np.isfinite(stock) else f'Текущий остаток неизвестен. При остатке ниже {max(0,forecast+safety-due):.1f} ед. по этой модели нужно пополнение. Количество рассчитывается после выбора сценария или ввода остатка.'
         if unknown_eta:reason+=f' Требуют уточнения даты поступления: {unknown_eta:g} ед.'
+        if cfg.forecast_method=='adaptive':reason+=f' Метод: {model_info["method"]}; внутренних проверочных месяцев: {model_info["cv_months"]}.'
+        if has_source_growth:reason+=f' Рост из сводки {source_growth:g}% применён вместо тренда истории.'
         results.append(dict(sku=sku,article=p.article,name=p['name'],category=str(p.category),supplier=ds.supplier,unit=p.unit,stock=stock,stock_threshold=round(max(0,forecast+safety-due),2),in_transit=due,late_transit=late,forecast=round(forecast,2),safety=round(safety,2),daily=round(rate,3),growth=round(growth*100,1),season=round(future_season,3),excluded=round(excluded,2),lost=round(lost,2),pack=pack,moq=moq,recommended=order,status=status,stockout_mode=stockout_mode,reason=reason))
         histories[sku]=pd.DataFrame({'Дата':full,'Продажи':s.values,'Без всплесков':regular.values,'С учётом отсутствия':corrected.values})
+        stress=max(0,model_info['stress_daily'])*(horizon+cfg.safety_days*cat)*max(0,1+cfg.growth_percent/100)
+        if has_source_growth:stress*=max(0,1+source_growth/100)
+        stress_need=max(0,forecast+safety+stress-stock-due) if np.isfinite(stock) else np.nan
+        stress_order=math.ceil(max(stress_need,moq)/pack)*pack if np.isfinite(stress_need) and stress_need>1e-8 else 0 if np.isfinite(stress_need) else np.nan
+        results[-1].update(method=model_info['method'],demand_type=model_info['demand_type'],cv_months=model_info['cv_months'],cv_wape=model_info['cv_wape'],stress_recommended=stress_order,first_shortage=first_shortage,source_growth_percent=source_growth if has_source_growth else np.nan)
+        histories[sku].attrs['model_info']=model_info
+        histories[sku].attrs['future']=[{'Дата':str(d.date()),'Прогноз в день':float(v)} for d,v in zip(future,daily_rates)]
     return pd.DataFrame(results),histories,anomalies

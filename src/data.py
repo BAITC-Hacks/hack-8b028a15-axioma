@@ -70,6 +70,8 @@ def parse_files(files, supplier):
                     sku=key(row[ix['Код 1с']]);
                     if not sku: continue
                     product(sku,article=key(row[ix['Артикул поставщика']]),name=key(row[ix['Наименование']]),category=key(row[ix['Категория 2026']]),stock=number(row[ix['Свободный остаток']],np.nan))
+                    if 'Кэф. Роста' in ix:
+                        product(sku,source_growth_percent=100*number(row[ix['Кэф. Роста']],np.nan))
                     # This summary is a fallback only; the dedicated monthly report wins.
                     for ci,dt in mc: sales.append(dict(sku=sku,date=dt,quantity=number(row[ci]),priority=0))
                     for ci in tc:

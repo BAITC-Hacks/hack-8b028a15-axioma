@@ -27,3 +27,4 @@ def test_missing_target_not_scored_as_zero():
     detail,scores,_=backtest(d)
     assert len(detail)==2
     assert scores.iloc[0].months==2
+

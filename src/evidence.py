@@ -61,3 +61,4 @@ def acceptance_examples():
     row=order(changed)
     record('Дополнительно: позднее поступление',0,row.recommended,'При итоговом избытке нужен заказ 120 ед. для разрыва по датам',row.recommended==120)
     return pd.DataFrame(rows)
+

@@ -58,7 +58,7 @@ def test_zip_import_reads_members_without_extracting_paths():
 def test_recurring_large_customer_is_not_deleted_as_one_off():
     from src.engine import clean_transactions
     tx=pd.DataFrame([dict(sku='A',date=pd.Timestamp('2026-08-01')+pd.Timedelta(days=i),quantity=2.,document=f'd{i}',client_id=f'c{i}') for i in range(20)])
-    repeat=pd.DataFrame([dict(sku='A',date=pd.Timestamp('2026-08-21')+pd.Timedelta(days=i),quantity=100.,document=f'big{i}',client_id='regular-large') for i in range(3)])
+    repeat=pd.DataFrame([dict(sku='A',date=pd.Timestamp('2026-01-21')+pd.DateOffset(months=i*2),quantity=100.,document=f'big{i}',client_id='regular-large') for i in range(3)])
     cleaned,_=clean_transactions(pd.concat([tx,repeat],ignore_index=True))
     assert cleaned.loc[cleaned.client_id.eq('regular-large'),'quantity'].sum()==300
 

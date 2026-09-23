@@ -19,3 +19,4 @@ if __name__ == '__main__':
                       'suppliers': result.supplier.unique().tolist(), 'import_seconds': round(imported-started, 1),
                       'calculation_seconds': round(perf_counter()-imported, 1),
                       'source_checks': dataset.source_checks.to_dict('records'), 'warnings': dataset.warnings}, ensure_ascii=False, indent=2))
+

@@ -193,3 +193,4 @@ def test_earlier_monthly_history_informs_seasonality_without_double_count():
     baseline = row.recommended_qty
     ds.monthly_sales = pd.concat([ds.monthly_sales, pd.DataFrame([dict(supplier='Test', sku='001', month='2026-08-01', qty=1000000)])], ignore_index=True)
     assert first(ds).recommended_qty == baseline
+

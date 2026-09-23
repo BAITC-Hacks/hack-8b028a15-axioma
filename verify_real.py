@@ -14,7 +14,8 @@ if __name__=='__main__':
         assert len(ds.sources)==6 and not unknown,ds.sources
         assert not ds.products.sku.duplicated().any()
         assert len(ds.transactions)>1000
-        result,history,anomalies=calculate(ds,Settings())
+        import_seconds=time.perf_counter()-start
+        result,history,anomalies=calculate(ds,Settings(forecast_method='auto',use_source_growth=False))
         assert len(result)==len(ds.products)
         assert result.recommended.dropna().ge(0).all()
         complete=result.dropna(subset=['recommended'])
@@ -26,6 +27,10 @@ if __name__=='__main__':
                             recommendations=int(result.recommended.gt(0).sum()),missing_stock=int(result.recommended.isna().sum()),
                             anomalies=len(anomalies),seasonality_months=len(ds.seasonal),
                             supplier_growth_known=int(ds.products.source_growth.notna().sum()),
+                            source_mismatch_skus=int(result.source_mismatch_months.fillna(0).gt(0).sum()),
+                            import_seconds=round(import_seconds,2),calculation_seconds=round(time.perf_counter()-start-import_seconds,2),
+                            method='auto',source_growth_applied=False,
                             elapsed_seconds=round(time.perf_counter()-start,2),warnings=ds.warnings))
         print(json.dumps(reports[-1],ensure_ascii=False),flush=True)
     target=Path(args.report);target.parent.mkdir(parents=True,exist_ok=True);target.write_text(json.dumps(reports,ensure_ascii=False,indent=2),encoding='utf-8')
+

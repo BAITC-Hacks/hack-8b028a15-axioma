@@ -25,7 +25,7 @@ def backtest(dataset, as_of='2026-09-23', months=3, max_skus=30, include_pooled=
         train.transit = train.transit.iloc[:0].copy()
         # Dates when these retrospective intervals became known are unavailable.
         train.stockouts = train.stockouts.iloc[:0].copy()
-        train.products=train.products.drop(columns=['source_growth_percent','source_growth'],errors='ignore')
+        train.products=train.products.drop(columns=['source_growth_percent','source_growth','lead_days'],errors='ignore')
         cfg = Settings(as_of=str(target.date()),lead_days=target.days_in_month,review_days=0,safety_days=0,compensate_stockout=False)
         model = calculate(train,cfg)[0]
         from dataclasses import replace

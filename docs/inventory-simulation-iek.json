@@ -1,0 +1,505 @@
+{
+  "measured_at": "2026-09-23T12:32:05.118911+00:00",
+  "python": "3.14.7",
+  "code_sha256": "0346bdf2f7db350b5fd739cee48937060193bc35b3743c17111a2fc22f7202ea",
+  "data_type": "Отчёты компании",
+  "input_sha256": "2940a83820760f6e67a8f2493497472d60599676cc6d999a28deabe11b4c5806",
+  "settings": {
+    "start": "2026-06-01",
+    "end": "2026-08-31",
+    "lead_days": 21,
+    "review_days": 14,
+    "safety_days": 7,
+    "initial_days": 21,
+    "max_skus": 100
+  },
+  "metadata": {
+    "kind": "Ретроспективная симуляция",
+    "settings": {
+      "start": "2026-06-01",
+      "end": "2026-08-31",
+      "lead_days": 21,
+      "review_days": 14,
+      "safety_days": 7,
+      "initial_days": 21,
+      "max_skus": 100
+    },
+    "supplier": "IEK",
+    "eligible_skus": 2463,
+    "selected_skus": 100,
+    "evaluated_skus": 100,
+    "excluded_skus": 0,
+    "selection": "Первые коды в строковой сортировке с >=6 месяцами ДО старта; пропуски целевых месяцев раскрыты отдельно",
+    "invalid_months": "Отсутствующие, неконечные и отрицательные месячные итоги не участвуют в покрытии; пропуски внутри обучающей истории модель заполняет нулями как явное допущение",
+    "demand": "Месячные наблюдаемые продажи равномерно распределены по дням; это не истинный спрос и не фактические дни дефицита",
+    "initial_stock": "Средний дневной спрос последних 6 завершённых месяцев до старта × initial_days; одинаково для всех политик",
+    "opening_transit": "Только явно переданный путь с known_on <= start; текущий путь из файлов не используется",
+    "product_rules": "Текущие MOQ/кратность/единицы заморожены одинаково для всех политик как допущение; исторические изменения неизвестны",
+    "training_population": "Общая модель обучается на выбранных до просмотра целевого периода SKU; выборка не представляет весь каталог",
+    "model_status": "Модели не изменялись и не выбирались по этому периоду; июнь–август уже просматривались, независимая проверка не заявляется",
+    "zero_demand_fill": "Процент обслуживания не определён при нулевом спросе; такие товары отдельно учтены в знаменателях",
+    "positive_demand_skus": 73
+  },
+  "elapsed_seconds": 14.359,
+  "aggregates": [
+    {
+      "policy": "adaptive",
+      "mode": "backorder",
+      "evaluated_skus": 100,
+      "positive_demand_skus": 73,
+      "zero_demand_skus": 27,
+      "macro_immediate_fill_pct": 42.7902733416,
+      "macro_eventual_fill_pct": 95.5673229115,
+      "mean_shortage_days": 28.94,
+      "worse_service_skus": 42,
+      "better_service_skus": 9,
+      "less_stock_skus": 48,
+      "lower_stock_worse_service_skus": 40,
+      "more_stock_skus": 20,
+      "service_stock_tradeoff_skus": 9
+    },
+    {
+      "policy": "adaptive",
+      "mode": "lost",
+      "evaluated_skus": 100,
+      "positive_demand_skus": 73,
+      "zero_demand_skus": 27,
+      "macro_immediate_fill_pct": 57.2530977371,
+      "macro_eventual_fill_pct": 57.2530977371,
+      "mean_shortage_days": 19.89,
+      "worse_service_skus": 47,
+      "better_service_skus": 5,
+      "less_stock_skus": 52,
+      "lower_stock_worse_service_skus": 44,
+      "more_stock_skus": 16,
+      "service_stock_tradeoff_skus": 5
+    },
+    {
+      "policy": "mean",
+      "mode": "backorder",
+      "evaluated_skus": 100,
+      "positive_demand_skus": 73,
+      "zero_demand_skus": 27,
+      "macro_immediate_fill_pct": 56.7298523997,
+      "macro_eventual_fill_pct": 97.7075733875,
+      "mean_shortage_days": 21.3,
+      "worse_service_skus": 0,
+      "better_service_skus": 0,
+      "less_stock_skus": 0,
+      "lower_stock_worse_service_skus": 0,
+      "more_stock_skus": 0,
+      "service_stock_tradeoff_skus": 0
+    },
+    {
+      "policy": "mean",
+      "mode": "lost",
+      "evaluated_skus": 100,
+      "positive_demand_skus": 73,
+      "zero_demand_skus": 27,
+      "macro_immediate_fill_pct": 70.1881916433,
+      "macro_eventual_fill_pct": 70.1881916433,
+      "mean_shortage_days": 12.85,
+      "worse_service_skus": 0,
+      "better_service_skus": 0,
+      "less_stock_skus": 0,
+      "lower_stock_worse_service_skus": 0,
+      "more_stock_skus": 0,
+      "service_stock_tradeoff_skus": 0
+    },
+    {
+      "policy": "pooled",
+      "mode": "backorder",
+      "evaluated_skus": 100,
+      "positive_demand_skus": 73,
+      "zero_demand_skus": 27,
+      "macro_immediate_fill_pct": 42.721222136,
+      "macro_eventual_fill_pct": 96.0271894717,
+      "mean_shortage_days": 29.56,
+      "worse_service_skus": 41,
+      "better_service_skus": 8,
+      "less_stock_skus": 44,
+      "lower_stock_worse_service_skus": 39,
+      "more_stock_skus": 18,
+      "service_stock_tradeoff_skus": 7
+    },
+    {
+      "policy": "pooled",
+      "mode": "lost",
+      "evaluated_skus": 100,
+      "positive_demand_skus": 73,
+      "zero_demand_skus": 27,
+      "macro_immediate_fill_pct": 58.6480018097,
+      "macro_eventual_fill_pct": 58.6480018097,
+      "mean_shortage_days": 19.66,
+      "worse_service_skus": 44,
+      "better_service_skus": 4,
+      "less_stock_skus": 43,
+      "lower_stock_worse_service_skus": 40,
+      "more_stock_skus": 21,
+      "service_stock_tradeoff_skus": 4
+    }
+  ],
+  "forecast_diagnostics": [
+    {
+      "policy": "adaptive",
+      "evaluated_skus": 100,
+      "positive_actual_skus": 73,
+      "zero_actual_skus": 27,
+      "macro_wape_pct": 84.27804380614964,
+      "macro_signed_bias_pct": -31.614144017042566,
+      "overforecast_skus": 12,
+      "underforecast_skus": 61,
+      "zero_actual_positive_forecast_skus": 7
+    },
+    {
+      "policy": "mean",
+      "evaluated_skus": 100,
+      "positive_actual_skus": 73,
+      "zero_actual_skus": 27,
+      "macro_wape_pct": 83.34489318015237,
+      "macro_signed_bias_pct": 2.4704356652308657,
+      "overforecast_skus": 23,
+      "underforecast_skus": 50,
+      "zero_actual_positive_forecast_skus": 10
+    },
+    {
+      "policy": "pooled",
+      "evaluated_skus": 100,
+      "positive_actual_skus": 73,
+      "zero_actual_skus": 27,
+      "macro_wape_pct": 81.29623590366276,
+      "macro_signed_bias_pct": -26.54131322864885,
+      "overforecast_skus": 15,
+      "underforecast_skus": 58,
+      "zero_actual_positive_forecast_skus": 10
+    }
+  ],
+  "methods": [
+    {
+      "policy": "adaptive",
+      "method": "Croston–SBA",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Croston–SBA + TSB: вероятность × размер спроса + Среднее 6 месяцев",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Croston–SBA + Среднее 12 месяцев",
+      "forecast_origins": 9
+    },
+    {
+      "policy": "adaptive",
+      "method": "Croston–SBA + Среднее 12 месяцев + Сезонный аналог прошлого года",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Croston–SBA + Среднее 12 месяцев + Среднее 6 месяцев",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "TSB: вероятность × размер спроса",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "TSB: вероятность × размер спроса + Croston–SBA",
+      "forecast_origins": 4
+    },
+    {
+      "policy": "adaptive",
+      "method": "TSB: вероятность × размер спроса + Среднее 12 месяцев",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "TSB: вероятность × размер спроса + Среднее 6 месяцев + Экспоненциальное сглаживание",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "Затухающий тренд",
+      "forecast_origins": 37
+    },
+    {
+      "policy": "adaptive",
+      "method": "Затухающий тренд + Среднее 3 месяца",
+      "forecast_origins": 17
+    },
+    {
+      "policy": "adaptive",
+      "method": "Затухающий тренд + Среднее 3 месяца + Среднее 12 месяцев",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Затухающий тренд + Среднее 3 месяца + Среднее 6 месяцев",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Затухающий тренд + Среднее 6 месяцев",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "Затухающий тренд + Экспоненциальное сглаживание",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "Затухающий тренд + Экспоненциальное сглаживание + Среднее 12 месяцев",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "Сезонный аналог прошлого года",
+      "forecast_origins": 31
+    },
+    {
+      "policy": "adaptive",
+      "method": "Сезонный аналог прошлого года + Затухающий тренд + Среднее 3 месяца",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Сезонный аналог прошлого года + Сезонный аналог с поправкой уровня",
+      "forecast_origins": 65
+    },
+    {
+      "policy": "adaptive",
+      "method": "Сезонный аналог прошлого года + Сезонный аналог с поправкой уровня + Croston–SBA",
+      "forecast_origins": 21
+    },
+    {
+      "policy": "adaptive",
+      "method": "Сезонный аналог прошлого года + Экспоненциальное сглаживание",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "Сезонный аналог с поправкой уровня",
+      "forecast_origins": 46
+    },
+    {
+      "policy": "adaptive",
+      "method": "Сезонный аналог с поправкой уровня + Затухающий тренд + Среднее 3 месяца",
+      "forecast_origins": 4
+    },
+    {
+      "policy": "adaptive",
+      "method": "Сезонный аналог с поправкой уровня + Сезонный аналог прошлого года",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Сезонный аналог с поправкой уровня + Среднее 12 месяцев",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев",
+      "forecast_origins": 37
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Croston–SBA",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Croston–SBA + Сезонный аналог прошлого года",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + TSB: вероятность × размер спроса",
+      "forecast_origins": 10
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Затухающий тренд + Среднее 3 месяца",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Сезонный аналог прошлого года",
+      "forecast_origins": 7
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Сезонный аналог прошлого года + Экспоненциальное сглаживание",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Сезонный аналог с поправкой уровня",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Среднее 3 месяца + Затухающий тренд",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Среднее 6 месяцев",
+      "forecast_origins": 16
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Среднее 6 месяцев + TSB: вероятность × размер спроса",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Среднее 6 месяцев + Среднее 3 месяца",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Среднее 6 месяцев + Экспоненциальное сглаживание",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Экспоненциальное сглаживание",
+      "forecast_origins": 5
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Экспоненциальное сглаживание + TSB: вероятность × размер спроса",
+      "forecast_origins": 3
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 12 месяцев + Экспоненциальное сглаживание + Среднее 3 месяца",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 3 месяца",
+      "forecast_origins": 16
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 3 месяца + Затухающий тренд",
+      "forecast_origins": 19
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 3 месяца + Затухающий тренд + Среднее 12 месяцев",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 3 месяца + Затухающий тренд + Экспоненциальное сглаживание",
+      "forecast_origins": 9
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 3 месяца + Среднее 6 месяцев + Затухающий тренд",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 3 месяца + Среднее 6 месяцев + Сезонный аналог с поправкой уровня",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 3 месяца + Среднее 6 месяцев + Экспоненциальное сглаживание",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 6 месяцев",
+      "forecast_origins": 59
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 6 месяцев + Среднее 12 месяцев",
+      "forecast_origins": 8
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 6 месяцев + Среднее 12 месяцев + Экспоненциальное сглаживание",
+      "forecast_origins": 4
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 6 месяцев + Среднее 3 месяца",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 6 месяцев + Среднее 3 месяца + Затухающий тренд",
+      "forecast_origins": 44
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 6 месяцев + Среднее 3 месяца + Среднее 12 месяцев",
+      "forecast_origins": 106
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 6 месяцев + Экспоненциальное сглаживание",
+      "forecast_origins": 11
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 6 месяцев + Экспоненциальное сглаживание + Затухающий тренд",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Среднее 6 месяцев + Экспоненциальное сглаживание + Среднее 12 месяцев",
+      "forecast_origins": 4
+    },
+    {
+      "policy": "adaptive",
+      "method": "Экспоненциальное сглаживание",
+      "forecast_origins": 21
+    },
+    {
+      "policy": "adaptive",
+      "method": "Экспоненциальное сглаживание + Среднее 12 месяцев",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Экспоненциальное сглаживание + Среднее 12 месяцев + TSB: вероятность × размер спроса",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Экспоненциальное сглаживание + Среднее 3 месяца",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Экспоненциальное сглаживание + Среднее 3 месяца + Среднее 6 месяцев",
+      "forecast_origins": 2
+    },
+    {
+      "policy": "adaptive",
+      "method": "Экспоненциальное сглаживание + Среднее 6 месяцев + Среднее 12 месяцев",
+      "forecast_origins": 4
+    },
+    {
+      "policy": "mean",
+      "method": "Эвристическая модель",
+      "forecast_origins": 700
+    },
+    {
+      "policy": "pooled",
+      "method": "Общая модель HistGradientBoosting + среднее",
+      "forecast_origins": 700
+    }
+  ],
+  "disclosure": "June–August already used during development; no independent final test, no true latent demand, no measured financial savings. No mixed-unit stock totals."
+}

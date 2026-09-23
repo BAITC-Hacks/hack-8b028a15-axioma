@@ -29,7 +29,7 @@ st.markdown('''<style>
 def load_demo(version):return demo_data()
 @st.cache_data(show_spinner=False)
 def load_files(files,supplier):return parse_files(files,supplier)
-CALCULATION_VERSION=hashlib.sha256(b''.join((Path(__file__).parent/'src'/name).read_bytes() for name in ['engine.py','forecasting.py','pooled.py','planning.py','robustness.py','data.py'])).hexdigest()
+CALCULATION_VERSION=hashlib.sha256(b''.join((Path(__file__).parent/'src'/name).read_bytes() for name in ['engine.py','forecasting.py','pooled.py','planning.py','robustness.py','data.py','effect.py'])).hexdigest()
 @st.cache_data(show_spinner=False)
 def cached_run(ds,cfg,version):return calculate(ds,cfg)
 def run(ds,cfg):return cached_run(ds,cfg,CALCULATION_VERSION)
@@ -73,7 +73,8 @@ with st.sidebar:
     safety=st.number_input('Страховой запас, дней',min_value=0,max_value=90,value=7)
     growth=st.slider('Дополнительный прогноз прироста, %',-50,100,0,help='Ручной сценарий поверх тренда, оценённого по истории.')
     st.divider()
-    method=st.selectbox('Метод расчёта',['Общая ML-модель','Автовыбор по истории','Axioma: настроенная модель','Обычное среднее за 6 месяцев'],help='Общая модель обучается на прошлых месяцах всех загруженных товаров. При менее 200 обучающих примерах применяется статистический автовыбор. Автовыбор сравнивает методы на шести доступных месяцах внутри истории. Независимая проверка выполняется отдельно.')
+    method=st.selectbox('Метод расчёта',['Общая ML-модель','Автовыбор по истории','Axioma: настроенная модель','Обычное среднее за 6 месяцев'],help='Общая модель обучается на прошлых месяцах всех загруженных товаров. При менее 200 обучающих примерах применяется статистический автовыбор. Автовыбор сравнивает методы на шести доступных месяцах внутри истории. Для независимой проверки нужен новый период.')
+    st.caption('ML не гарантирует лучшего заказа. В «Проверке эффекта» сравните сервис и запас с простым средним; проигрыши показаны отдельно.')
     source_growth=st.checkbox('Применить рост из сводки вместо тренда',False,help='Поле «Кэф. Роста» импортируется как доля изменения: 0,2 означает +20%. Это явный сценарий менеджера; подтвердите смысл коэффициента у владельца данных.')
     remove=st.toggle('Исключать разовые всплески',True)
     seasonal=st.toggle('Учитывать сезонность',True)
@@ -212,7 +213,7 @@ cards[1].metric('Подготовить заказ',int(result.recommended.gt(0)
 cards[2].metric('Ускорить · включая сценарии',int((result.urgency_any|result.expedite_need.gt(0)).sum()))
 cards[3].metric('Проверить остаток',len(queue))
 calculation_id=hashlib.sha256((result.to_json(date_format='iso')+json.dumps(vars(cfg),sort_keys=True,ensure_ascii=False)+ds.transit.to_json(date_format='iso')).encode()).hexdigest()[:16]
-orders_tab,detail_tab,quality_tab,comparison_tab,evidence_tab=st.tabs(['Рабочее место','Почему столько','Качество данных','Сравнение методов','Проверка кейса'])
+orders_tab,detail_tab,quality_tab,comparison_tab,evidence_tab,effect_tab=st.tabs(['Рабочее место','Почему столько','Качество данных','Сравнение методов','Проверка кейса','Проверка эффекта'])
 with orders_tab:
     urgent=result[result.status.eq('Срочно')]
     if not urgent.empty:
@@ -434,3 +435,127 @@ with evidence_tab:
     st.markdown('**Что требуется для пилота у Электрокомплект**')
     st.write('Ежедневный свободный остаток и резервы; обезличенный ID клиента; точные периоды отсутствия; согласованные сроки, MOQ и единицы закупки. Подключение этих источников позволит проверять решения на новом периоде.')
     st.caption('План пилота: 2 недели параллельного расчёта с менеджером без автоматической отправки. Измерять время подготовки заказа, долю ручных правок и дни дефицита; денежный эффект считать только после получения цен и фактических затрат.')
+
+
+with effect_tab:
+    from src.effect import (Experiment, compare_inventory, aggregate_metrics, forecast_diagnostics,
+                            scenario_costs, protocol_zip, pilot_zip, POLICIES, MODES)
+    st.subheader('Проверка эффекта: обслуживание, запас и цена допущений')
+    st.write('Сравниваем решения по запасам на одной истории и при одинаковых правилах. Простое среднее — явно заданная политика сравнения; реальный процесс закупщика нам неизвестен.')
+    with st.expander('Что уже доказано, а что предстоит измерить'):
+        st.dataframe(pd.DataFrame([
+            {'Тип доказательства':'Воспроизводимые тесты','Что подтверждено':'Арифметика, сроки поступлений, сценарии, MOQ, кратность, отсутствие доступа к будущим данным'},
+            {'Тип доказательства':'Измерение на файлах компании','Что подтверждено':'Время вычислений и чувствительность рекомендаций; это не время работы менеджера'},
+            {'Тип доказательства':'Ретроспективная симуляция','Что подтверждено':'Сравнение политик при выбранных начальном запасе, сроках и распределении продаж по дням'},
+            {'Тип доказательства':'Реальный пилот — ещё не проведён','Что подтверждено':'Экономия денег, активное время закупщика и внедрение требуют подтверждения заказчика'},
+        ]),hide_index=True,width='stretch')
+    st.caption(f'Источник: {source_ds.supplier} · версия входных файлов {dataset_id}. '
+               + ('Синтетические данные демо.' if mode=='Показать пример' else 'Загруженные отчёты; коммерческие исходники не публикуются.'))
+    last_complete=pd.Timestamp(as_of).replace(day=1)-pd.Timedelta(days=1)
+    first_complete=(last_complete-pd.DateOffset(months=2)).replace(day=1)
+    c1,c2,c3=st.columns(3)
+    sim_start=c1.date_input('Начало симуляции · первое число',value=first_complete.date(),key='effect-start')
+    sim_end=c2.date_input('Конец симуляции · последнее число',value=last_complete.date(),key='effect-end')
+    sim_limit=c3.number_input('Максимум товаров в проверке',min_value=1,max_value=100,value=30,key='effect-limit')
+    c1,c2,c3,c4=st.columns(4)
+    sim_lead=c1.number_input('Срок поставки в симуляции, дней',1,365,21,key='effect-lead')
+    sim_review=c2.number_input('Пересмотр в симуляции, дней',1,90,14,key='effect-review')
+    sim_safety=c3.number_input('Страховой запас в симуляции, дней',0,90,7,key='effect-safety')
+    sim_initial=c4.number_input('Начальный запас, дней прошлого спроса',0.,365.,21.,key='effect-initial')
+    experiment=Experiment(str(sim_start),str(sim_end),sim_lead,sim_review,sim_safety,sim_initial,sim_limit)
+    st.write('**Три политики:** среднее за 6 завершённых месяцев без очистки и сезонности; текущий автовыбор; общая ML-модель (на малой истории — статистический резервный метод). Модели сохранены без подгонки по результату. Общая модель здесь обучается на выбранных товарах, а не на всём каталоге.')
+    st.caption('Начальный запас = средний дневной спрос до старта × выбранное число дней. MOQ и кратность из текущих входов заморожены одинаково. Текущие остатки, текущий путь и готовые сезонные коэффициенты исключены: их историческая доступность неизвестна. Начальный путь здесь нулевой; новые заказы моделируются отдельно.')
+    st.warning('Это симуляция, не предотвращённые потери. Месячные продажи равномерно распределены по дням; реальный спрос мог быть ограничен дефицитом. Показываем и потерянную продажу, и отложенный заказ. Июнь–август 2026 уже использовались при разработке и не являются независимым финальным тестом.')
+    signature=hashlib.sha256((dataset_id+CALCULATION_VERSION+str(vars(experiment))+
+                            source_ds.sales.to_json(date_format='iso')+source_ds.transactions.to_json(date_format='iso')+
+                            source_ds.products.to_json()).encode()).hexdigest()
+    if st.button('Сравнить политики запасов',type='primary'):
+        try:
+            with st.spinner('Пересчитываю решения только по доступной на каждую дату истории…'):
+                effect=compare_inventory(source_ds,experiment)
+            effect[4].update(input_batch=dataset_id,calculation_version=CALCULATION_VERSION,
+                             data_type='Синтетические данные' if mode=='Показать пример' else 'Отчёты компании',
+                             calculated_at=pd.Timestamp.now(tz='UTC').isoformat())
+            st.session_state['effect_result']=(signature,effect)
+        except ValueError as error:
+            st.error(str(error));st.session_state.pop('effect_result',None)
+    saved=st.session_state.get('effect_result')
+    if saved is not None and saved[0]!=signature:
+        st.info('Входы или условия изменились. Пересчитайте сравнение: прежние результаты скрыты.')
+    if saved is not None and saved[0]==signature:
+        er,ed,eo,ee,em,ef=saved[1]
+        st.markdown('**Ретроспективная симуляция · '+('синтетический пример' if mode=='Показать пример' else 'на загруженной истории продаж')+'**')
+        st.write(f"Период: {experiment.start} — {experiment.end}. Проверено {em['evaluated_skus']} из {em['selected_skus']} выбранных товаров; подходят по прошлой истории {em['eligible_skus']}. Исключено из-за пропусков целевых месяцев: {em['excluded_skus']}.")
+        if er.empty:
+            st.info('Недостаточно данных: нужны минимум 6 наблюдаемых месяцев до старта и все месяцы оцениваемого периода. Пропуск не считается нулевой продажей.')
+            if not ee.empty:st.dataframe(ee,hide_index=True)
+        else:
+            agg=aggregate_metrics(er)
+            effect_labels={'policy':'Политика','mode':'Неудовлетворённый спрос','evaluated_skus':'Проверено SKU',
+                'positive_demand_skus':'SKU в знаменателе обслуживания','zero_demand_skus':'SKU с нулевым спросом',
+                'macro_immediate_fill_pct':'Обслужено сразу, % · среднее по SKU','macro_eventual_fill_pct':'Обслужено к концу, % · среднее по SKU',
+                'mean_shortage_days':'Средние дни дефицита','worse_service_skus':'SKU с худшим обслуживанием',
+                'better_service_skus':'SKU с лучшим обслуживанием','less_stock_skus':'SKU с меньшим запасом','lower_stock_worse_service_skus':'SKU: меньше запас, хуже сервис','more_stock_skus':'SKU с большим запасом','service_stock_tradeoff_skus':'SKU: лучше сервис, больше запас',
+                'sku':'Код 1С','unit':'Ед.','name':'Товар','shortage_days':'Дни дефицита','backlog_days':'Дни с отложенным спросом',
+                'immediate_fill_rate':'Доля обслуживания сразу','eventual_fill_rate':'Доля обслуживания к концу',
+                'average_stock':'Средний запас','orders':'Число заказов','end_stock':'Конечный остаток','end_backlog':'Не выполнено к концу',
+                'end_pipeline':'Путь после конца периода','fill_change_pp':'Изменение обслуживания, п.п.','stock_change':'Изменение среднего запаса',
+                'worse_service':'Хуже обслуживание','more_stock':'Больше запас','tradeoff':'Лучше сервис ценой запаса',
+                'history_zero_fraction':'Доля нулевых месяцев в прошлых 6','history_months':'Месяцев прошлой истории'}
+            def effect_view(frame):
+                return frame.replace({'policy':POLICIES,'mode':MODES}).rename(columns=effect_labels)
+            summary_mode=st.radio('Режим дефицита в итогах',list(MODES),format_func=MODES.get,horizontal=True,key='effect-summary-mode')
+            group=agg[agg['mode'].eq(summary_mode)].set_index('policy')
+            reference=group.loc['mean','macro_immediate_fill_pct']
+            for col,policy in zip(st.columns(3),POLICIES):
+                item=group.loc[policy];fill=item.macro_immediate_fill_pct
+                delta=f'{fill-reference:+.2f} п.п. к среднему' if policy!='mean' and pd.notna(fill) else None
+                col.metric(POLICIES[policy],f'{fill:.2f}%' if pd.notna(fill) else 'Нет спроса',delta=delta)
+                col.caption(f"Обслужено сразу · {int(item.positive_demand_skus)} SKU в знаменателе. Хуже среднего: {int(item.worse_service_skus)} SKU; больший запас: {int(item.more_stock_skus)}.")
+            with st.expander('Все агрегаты: оба режима, нулевой спрос, запас и компромиссы'):
+                st.dataframe(effect_view(agg).round(2),hide_index=True,width='stretch')
+            st.caption('Обслуживание: среднее долей по SKU с положительными продажами. Товары с нулём учитываются отдельно. Дни дефицита — дни неудовлетворённого нового спроса в симуляции. Запасы разных товаров и единиц не складываются.')
+            columns=['sku','name','unit','policy','mode','shortage_days','backlog_days','immediate_fill_rate','eventual_fill_rate','average_stock','orders','end_stock','end_backlog','end_pipeline','fill_change_pp','stock_change','worse_service','more_stock','history_zero_fraction']
+            with st.expander('Все товары и натуральные показатели'):
+                st.dataframe(effect_view(er[columns]).round(3),hide_index=True,width='stretch')
+            worse=er[er.policy.ne('mean')&(er.worse_service|er.more_stock)]
+            st.markdown('**Где обслуживание хуже или запас больше среднего**')
+            st.caption('Отрицательное изменение обслуживания означает, что выбранная модель проиграла простому среднему. Для текущего заказа простой метод доступен в настройке «Метод расчёта». Больший запас — обратная сторона решения, а не автоматически денежный убыток. Строки включают оба режима неудовлетворённого спроса.')
+            if worse.empty:st.info('В выбранных условиях таких случаев нет. Это не гарантия для других условий.')
+            else:st.dataframe(effect_view(worse[columns]).round(3),hide_index=True,width='stretch')
+            with st.expander('Ошибка и систематическое смещение прогноза'):
+                diagnostics=forecast_diagnostics(ef,ed,experiment.review_days)
+                st.caption('Непересекающиеся полные окна пересмотра; факт распределён по дням искусственно. WAPE не точность. Положительное смещение — завышение, отрицательное — занижение. При нулевом факте проценты не определены. Это диагностика сохранённых моделей, не независимый подбор.')
+                st.dataframe(effect_view(diagnostics).rename(columns={'wape_pct':'WAPE, %','signed_bias_pct':'Смещение, %','windows':'Полных окон','actual':'Продажи за окна','zero_actual_positive_forecast':'Нулевой факт, положительный прогноз'}).round(2),hide_index=True,width='stretch')
+                st.dataframe(ef[['policy','method']].drop_duplicates().replace({'policy':POLICIES}),hide_index=True)
+            sku_options=list(er.sku.drop_duplicates())
+            effect_sku=st.selectbox('Товар для дневного баланса и затрат',sku_options,key='effect-sku-'+signature[:12])
+            selected_policy=st.selectbox('Политика для дневного баланса',list(POLICIES),format_func=POLICIES.get,key='effect-policy')
+            selected_mode=st.selectbox('Модель дефицита для дневного баланса',list(MODES),format_func=MODES.get,key='effect-mode')
+            trace=ed[ed.sku.eq(effect_sku)&ed.policy.eq(selected_policy)&ed['mode'].eq(selected_mode)]
+            st.line_chart(trace.set_index('date')[['stock_end','unfilled_today','backlog_end']].rename(columns={'stock_end':'Остаток','unfilled_today':'Не обслужено сегодня','backlog_end':'Отложено к концу дня'}))
+            st.caption(f"Один товар {effect_sku}; единица: {er[er.sku.eq(effect_sku)].unit.iloc[0]}. Поступление — в начале дня, затем заказ, выполнение отложенного спроса и продажи дня. Заказы после конца периода сохраняются в пути, а не исчезают.")
+            costs=None
+            if st.checkbox('Рассчитать сценарные затраты по моим ставкам',key='effect-cost-enable'):
+                unit=str(er[er.sku.eq(effect_sku)].unit.iloc[0])
+                st.info('Цен в исходных данных нет. Введите собственные ставки и источник. Эти затраты сценарные; закупочные обязательства и остаточная стоимость показаны отдельно от операционных затрат.')
+                source=st.text_input('Источник ставок и дата согласования',key='effect-cost-source-'+effect_sku)
+                currency=st.text_input('Валюта ставок',value='KZT',key='effect-cost-currency')
+                cc1,cc2=st.columns(2)
+                price=cc1.number_input(f'Цена закупки, {currency}/{unit}',min_value=0.,key='effect-price-'+effect_sku)
+                holding=cc2.number_input(f'Хранение, {currency}/{unit}/день',min_value=0.,key='effect-holding-'+effect_sku)
+                line_cost=cc1.number_input(f'Оформление одной строки заказа, {currency}',min_value=0.,key='effect-line-'+effect_sku)
+                lost_cost=cc2.number_input(f'Потерянная продажа, {currency}/{unit}',min_value=0.,key='effect-lost-'+effect_sku)
+                backlog_cost=cc1.number_input(f'Ожидание отложенного спроса, {currency}/{unit}/день',min_value=0.,key='effect-backlog-'+effect_sku)
+                st.caption(f'Период {experiment.start} — {experiment.end}. Затраты = сумма дневных запасов × хранение + число строк заказов × оформление + потерянные единицы × ставка потери (либо сумма дневного отложенного спроса × ставка ожидания). Ставки хранения и дефицита варьируются независимо ×0,5 / ×1 / ×1,5. Цена закупки не прибавляется к этим затратам; полная прибыль не рассчитывается.')
+                if source.strip() and currency.strip():
+                    costs=scenario_costs(er[er.sku.eq(effect_sku)],price,holding,line_cost,lost_cost,backlog_cost,source,currency)
+                    costs['period_start']=experiment.start;costs['period_end']=experiment.end
+                    st.dataframe(effect_view(costs).rename(columns={'operating_cost':'Сценарные операционные затраты','generated_purchase_commitment':'Закупочные обязательства','residual_stock_value':'Стоимость конечного запаса','pending_generated_value':'Стоимость созданного пути','holding_factor':'Множитель хранения','shortage_factor':'Множитель дефицита','cost_change_vs_mean':'Разница затрат со средним','baseline_operating_cost':'Затраты простого среднего','storage_cost':'Хранение','ordering_cost':'Оформление строк','shortage_cost':'Дефицит','received_generated_value':'Стоимость полученных новых заказов','source':'Источник ставок','currency':'Валюта','unit_price':'Цена единицы','holding_per_unit_day':'Хранение единицы в день','order_line_cost':'Оформление строки','lost_per_unit':'Ставка потери единицы','backlog_per_unit_day':'Ожидание единицы в день','period_start':'Начало периода','period_end':'Конец периода'}).round(2),hide_index=True,width='stretch')
+                else:st.caption('До указания источника ставки не считаются подтверждёнными входами; денежный результат не выводится.')
+            st.download_button('Скачать протокол симуляции · ZIP',protocol_zip(er,ed,eo,ee,em,ef,costs),file_name='axioma-inventory-experiment.zip',mime='application/zip')
+    st.divider()
+    st.subheader('Подготовить контрольный пилот с закупщиком')
+    st.write('Пилот пока не проведён. Экспорт содержит пустые задания Excel/Axioma с чередованием порядка, версию входов и зафиксированные правила. Отдельно записываются активное время, ожидание, правки, причины и ошибки. Участника и проверяющего нужно назначить с заказчиком.')
+    st.download_button('Скачать задания пилота · ZIP',pilot_zip(source_ds.products,dataset_id,vars(cfg),source_ds.sources),file_name='axioma-pilot-assignments.zip',mime='application/zip')
+    st.caption('Критерии до начала: отсутствие критических ошибок, меньшее активное время при не худшем качестве. Порог и число заданий согласуются до измерения. Для складского результата дополнительно нужен новый период с ежедневными остатками, резервами, спросом и фактическими поступлениями.')

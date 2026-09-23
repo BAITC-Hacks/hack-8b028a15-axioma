@@ -194,3 +194,33 @@ def test_xlsx_upload_to_count_to_reviewed_export(monkeypatch):
     assert frame.iloc[0]['К заказу']>0
     assert 'synthetic-transactions.xlsx' in frame.iloc[0]['Источники данных']
     assert frame.iloc[0]['Основание остатка']=='Ручной пересчёт на 2026-09-23'
+
+
+def test_inventory_effect_ui_export_and_stale_result_invalidation(monkeypatch):
+    import streamlit as st
+    import zipfile
+    import json
+    from io import BytesIO
+    exports={};download=st.download_button
+    def capture(label,data,*args,**kwargs):
+        exports[label]=data
+        return download(label,data,*args,**kwargs)
+    monkeypatch.setattr(st,'download_button',capture)
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/'app.py',default_timeout=90).run()
+    next(b for b in app.button if b.label=='Сравнить политики запасов').click().run()
+    assert not app.exception
+    assert any('Обслужено сразу, % · среднее по SKU' in d.value.columns for d in app.dataframe)
+    with zipfile.ZipFile(BytesIO(exports['Скачать протокол симуляции · ZIP'])) as z:
+        metadata=json.loads(z.read('metadata.json'))
+        assert metadata['data_type']=='Синтетические данные' and metadata['evaluated_skus']==6
+        assert metadata['input_batch'] and 'forecast_diagnostics.csv' in z.namelist()
+    next(c for c in app.checkbox if c.label=='Рассчитать сценарные затраты по моим ставкам').check().run()
+    assert not app.exception
+    next(i for i in app.text_input if i.label=='Источник ставок и дата согласования').set_value('Синтетические ставки теста').run()
+    assert not app.exception
+    with zipfile.ZipFile(BytesIO(exports['Скачать протокол симуляции · ZIP'])) as z:
+        assert 'scenario_costs.csv' in z.namelist()
+    next(n for n in app.number_input if n.label=='Срок поставки в симуляции, дней').set_value(28).run()
+    assert not app.exception
+    assert any('прежние результаты скрыты' in i.value for i in app.info)
+    assert not any('Обслужено сразу, % · среднее по SKU' in d.value.columns for d in app.dataframe)

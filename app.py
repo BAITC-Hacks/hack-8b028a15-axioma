@@ -11,7 +11,7 @@ from src.engine import Settings, calculate
 
 st.set_page_config(page_title='Axioma · Закупки',page_icon='◈',layout='wide')
 st.markdown('''<style>
-.block-container{padding-top:2rem;max-width:1450px} h1{letter-spacing:-1.5px}
+.block-container{padding-top:4rem;max-width:1450px} h1{letter-spacing:-1.5px}
 [data-testid="stMetric"]{background:white;border:1px solid #e3e8ef;border-radius:14px;padding:18px}
 [data-testid="stSidebar"]{border-right:1px solid #e3e8ef}
 .eyebrow{font-size:12px;font-weight:700;letter-spacing:3px;color:#0d9488}

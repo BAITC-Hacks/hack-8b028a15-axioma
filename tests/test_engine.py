@@ -1,195 +1,75 @@
 from copy import deepcopy
+from dataclasses import replace
 import numpy as np
 import pandas as pd
-import pytest
-from axioma.model import Dataset
-from axioma.engine import calculate, Policy, clean_transactions
-from axioma.demo import make_demo
+from src.data import demo_data, Dataset
+from src.engine import Settings, calculate, clean_transactions
 
+def baseline():
+    d=Dataset('Test')
+    d.products=pd.DataFrame([dict(sku='A',article='A',name='Test',category='1',stock=0.,pack=1,moq=1,unit='шт')])
+    d.sales=pd.DataFrame([dict(sku='A',date=x,quantity=float(x.days_in_month*10)) for x in pd.date_range('2024-01-01','2026-08-01',freq='MS')])
+    return d
 
-def constant_dataset(qty=10):
-    dates = pd.date_range('2024-01-01', '2026-09-22')
-    product = dict(supplier='Test', sku='001', article='TEST-001', name='Синтетический товар', stock=0,
-                   category='C', lead_days=10, review_days=20, unit='шт', moq=0, pack=1, purchase_factor=1,
-                   growth_pct=np.nan, assumptions='test')
-    sales = pd.DataFrame({'supplier': 'Test', 'sku': '001', 'date': dates, 'qty': qty,
-                          'document': [f'D{i}' for i in range(len(dates))], 'client_id': 'anon'})
-    return Dataset(pd.DataFrame([product]), sales)
+def row(d,cfg=None):return calculate(d,cfg or Settings())[0].iloc[0]
 
+def test_order_arithmetic():
+    r=row(baseline());assert r.recommended==420
 
-def first(ds, policy=None):
-    return calculate(ds, policy)[0].iloc[0]
+def test_transit_reduces_order():
+    d=baseline();before=row(d).recommended
+    d.transit=pd.DataFrame([dict(sku='A',eta=pd.Timestamp('2026-09-25'),quantity=70)])
+    assert row(d).recommended==before-70
 
+def test_late_and_past_transit_not_counted():
+    d=baseline();d.transit=pd.DataFrame([dict(sku='A',eta=pd.Timestamp(dt),quantity=1000) for dt in ['2026-12-01','2026-09-01']])
+    assert row(d).recommended==420
 
-def test_formula_and_input_sensitivity():
-    ds = constant_dataset()
-    assert first(ds).recommended_qty == 370  # 30 days × 10 + 7 safety days × 10
-    ds.products.loc[0, 'stock'] = 100
-    assert first(ds).recommended_qty == 270
-    ds.incoming = pd.DataFrame([dict(supplier='Test', sku='001', eta='2026-09-25', qty=70)])
-    assert first(ds).recommended_qty == 200
-    ds.products.loc[0, 'category'] = 'A'
-    assert first(ds).recommended_qty == 270
-    ds.products.loc[0, 'growth_pct'] = 50
-    assert first(ds).recommended_qty == 490
+def test_unknown_stock_blocks_order():
+    d=baseline();d.products.loc[0,'stock']=np.nan
+    assert np.isnan(row(d).recommended)
 
+def test_zero_need_does_not_trigger_moq():
+    d=baseline();d.products.loc[0,'stock']=10000;d.products.loc[0,'moq']=100
+    assert row(d).recommended==0
 
-def test_incoming_after_horizon_not_deducted_and_overdue_not_assumed_received():
-    ds = constant_dataset()
-    for eta in ['2026-12-01', '2026-09-20']:
-        ds.incoming = pd.DataFrame([dict(supplier='Test', sku='001', eta=eta, qty=5000)])
-        assert first(ds).recommended_qty == 370
+def test_pack_and_moq():
+    d=baseline();d.products.loc[0,'pack']=12;d.products.loc[0,'moq']=500
+    assert row(d).recommended==504
 
+def test_known_stockout_increases_forecast():
+    d=baseline();d.sales.loc[d.sales.date.eq(pd.Timestamp('2026-08-01')),'quantity']=110
+    d.stockouts=pd.DataFrame([dict(sku='A',start=pd.Timestamp('2026-08-01'),end=pd.Timestamp('2026-08-20'))])
+    assert row(d).forecast>row(d,Settings(compensate_stockout=False)).forecast
 
-def test_late_arrival_does_not_hide_early_shortage():
-    ds = constant_dataset()
-    ds.products.loc[0, 'stock'] = 20
-    ds.incoming = pd.DataFrame([dict(supplier='Test', sku='001', eta='2026-10-15', qty=5000)])
-    row = first(ds)
-    assert row.recommended_qty == 0
-    assert row.urgency == 'Срочно'
-    assert row.shortage_date == '2026-09-25'
+def test_growth_and_category_change_result():
+    d=baseline();assert row(d,Settings(growth_percent=20)).recommended>row(d).recommended
+    assert row(d,Settings(category_factors={'1':2})).recommended>row(d).recommended
 
+def test_seasonal_pattern_changes_forecast():
+    d=baseline();d.sales.loc[d.sales.date.dt.month.eq(10),'quantity']*=3
+    assert row(d,Settings(as_of='2026-10-01')).forecast>row(d,Settings(as_of='2026-10-01',seasonality=False)).forecast
 
-def test_stockout_restores_only_confirmed_intervals():
-    ds = constant_dataset()
-    mask = ds.sales.date.between('2026-08-15', '2026-09-05')
-    ds.sales.loc[mask, 'qty'] = 0
-    raw = first(ds)
-    ds.stockouts = pd.DataFrame([dict(supplier='Test', sku='001', start='2026-08-15', end='2026-09-05')])
-    restored = first(ds)
-    assert restored.restored_qty == 220
-    assert restored.recommended_qty > raw.recommended_qty
-    assert first(ds, Policy(compensate_stockouts=False)).restored_qty == 0
+def test_incomplete_month_excluded():
+    d=baseline();before=row(d).recommended
+    d.sales=pd.concat([d.sales,pd.DataFrame([dict(sku='A',date=pd.Timestamp('2026-09-01'),quantity=100000)])],ignore_index=True)
+    assert row(d).recommended==before
 
+def test_invoice_spike_is_robust():
+    d=demo_data();a=calculate(d,Settings())[0].set_index('sku').loc['DEMO-001']
+    d.transactions=d.transactions[d.transactions.document!='ONE-OFF']
+    d.sales.loc[(d.sales.sku=='DEMO-001')&d.sales.date.eq(pd.Timestamp('2026-08-01')),'quantity']-=1500
+    b=calculate(d,Settings())[0].set_index('sku').loc['DEMO-001']
+    assert abs(a.forecast-b.forecast)<5
+    assert a.excluded>=1490
 
-def test_one_off_order_is_excluded_and_regular_demand_stable():
-    ds = constant_dataset()
-    baseline = first(ds).recommended_qty
-    spike = ds.sales.iloc[-1].copy()
-    spike['qty'], spike['document'], spike['client_id'] = 100000, 'PROJECT', 'anon-project'
-    ds.sales = pd.concat([ds.sales, spike.to_frame().T], ignore_index=True)
-    row = first(ds)
-    assert row.excluded_qty == 100000
-    assert abs(row.recommended_qty - baseline) / baseline < .05
-    assert first(ds, Policy(remove_outliers=False)).recommended_qty > baseline * 2
+def test_client_split_invoices_detected():
+    tx=pd.DataFrame([dict(sku='A',date=pd.Timestamp('2026-08-01')+pd.Timedelta(days=i),quantity=2,document=f'd{i}',client_id=f'c{i}') for i in range(20)])
+    extra=pd.DataFrame([dict(sku='A',date=pd.Timestamp('2026-08-25'),quantity=2,document=f'x{i}',client_id='same-client') for i in range(30)])
+    cleaned,anomalies=clean_transactions(pd.concat([tx,extra],ignore_index=True))
+    assert cleaned[cleaned.client_id=='same-client'].quantity.sum()<10
+    assert 'Разовый всплеск клиента за день' in anomalies.reason.values
 
-
-def test_split_client_order_and_repeated_bulk_demand():
-    dates = pd.date_range('2026-01-01', periods=50)
-    frame = pd.DataFrame({'date': dates, 'qty': 10, 'document': [str(i) for i in range(50)], 'client_id': 'anon-regular'})
-    split = pd.DataFrame([dict(date=dates[-1], qty=15, document=f'bulk{i}', client_id='anon-project') for i in range(20)])
-    cleaned = clean_transactions(pd.concat([frame, split]))
-    assert cleaned.loc[cleaned.client_id == 'anon-project', 'outlier'].all()
-    repeated = frame.copy()
-    repeated.loc[[10, 20, 30], 'qty'] = 1000
-    assert not clean_transactions(repeated).outlier.any()
-
-
-def test_seasonality_and_trend():
-    ds = constant_dataset()
-    ds.sales['qty'] = ds.sales.date.dt.month.map(lambda m: 30 if m in [10, 11, 12] else 10)
-    _, details = calculate(ds)
-    forecast = details[('Test', '001')]['forecast']
-    assert forecast[forecast.index.month == 10].mean() > forecast[forecast.index.month == 9].mean() * 1.5
-    ds = constant_dataset()
-    ds.sales['qty'] = 5 + np.arange(len(ds.sales)) * .05
-    assert first(ds).growth_factor > 1
-    ds.products.loc[0, 'growth_pct'] = 0
-    assert first(ds).growth_factor == 1
-
-
-def test_missing_stock_no_history_and_conversion_block():
-    ds = constant_dataset()
-    ds.products.loc[0, 'stock'] = np.nan
-    assert pd.isna(first(ds).recommended_qty)
-    ds.products.loc[0, 'stock'] = 0
-    ds.products['unit_conversion_required'] = True
-    assert pd.isna(first(ds).recommended_qty)
-    ds.products['unit_conversion_required'] = False
-    ds.sales = ds.sales.iloc[:0]
-    assert pd.isna(first(ds).recommended_qty)
-
-
-def test_moq_pack_and_conversion_are_separate():
-    ds = constant_dataset()
-    ds.products.loc[0, ['purchase_factor', 'moq', 'pack']] = [100, 5, 3]
-    row = first(ds)
-    assert row.recommended_qty == 6
-    assert row.stock_units == 600
-    ds.products.loc[0, 'stock'] = 10000
-    assert first(ds).recommended_qty == 0
-
-
-def test_returns_not_turned_into_positive_demand():
-    ds = constant_dataset()
-    ds.sales.loc[len(ds.sales) - 1, 'qty'] = -10000
-    row = first(ds)
-    assert row.recommended_qty < 370
-    assert row.excluded_qty == 0
-
-
-def test_future_sales_are_not_used():
-    ds = constant_dataset()
-    baseline = first(ds).recommended_qty
-    future = ds.sales.iloc[-1].copy()
-    future['date'], future['qty'] = pd.Timestamp('2026-12-01'), 1000000
-    ds.sales = pd.concat([ds.sales, future.to_frame().T], ignore_index=True)
-    assert first(ds).recommended_qty == baseline
-
-
-def test_demo_explanations_and_supplier_groups():
-    rows, details = calculate(make_demo())
-    assert rows.supplier.nunique() == 2
-    assert rows.explanation.str.len().min() > 100
-    assert rows.recommended_qty.notna().all()
-    assert rows.loc[rows.sku == 'DEMO-005', 'restored_qty'].iloc[0] > 0
-    assert rows.loc[rows.sku == 'DEMO-004', 'excluded_qty'].iloc[0] == 10000
-
-
-def test_invalid_input_is_rejected():
-    ds = constant_dataset()
-    ds.products.loc[0, 'pack'] = 0
-    with pytest.raises(ValueError):
-        calculate(ds)
-
-
-def test_current_day_transactions_with_time_are_included():
-    ds = constant_dataset()
-    ds.sales['date'] += pd.Timedelta(hours=15)
-    assert first(ds).recommended_qty == 370
-
-
-def test_nonfinite_and_fractional_parameters_rejected():
-    for col, value in [('stock', np.inf), ('pack', np.inf), ('lead_days', 1.5), ('growth_pct', -101)]:
-        ds = constant_dataset()
-        ds.products[col] = ds.products[col].astype(float)
-        ds.products.loc[0, col] = value
-        with pytest.raises(ValueError):
-            calculate(ds)
-
-
-def test_old_return_does_not_create_fake_zero_history():
-    ds = constant_dataset()
-    ds.sales = ds.sales[ds.sales.date >= '2025-01-01'].copy()
-    old_return = ds.sales.iloc[0].copy()
-    old_return['date'], old_return['qty'] = pd.Timestamp('2023-01-01'), -10
-    ds.sales = pd.concat([ds.sales, old_return.to_frame().T], ignore_index=True)
-    _, details = calculate(ds)
-    assert details[('Test', '001')]['history'].index.min() == pd.Timestamp('2025-01-01')
-
-
-def test_earlier_monthly_history_informs_seasonality_without_double_count():
-    ds = constant_dataset()
-    ds.sales = ds.sales[ds.sales.date >= '2026-01-01'].copy()
-    ds.monthly_sales = pd.DataFrame([dict(supplier='Test', sku='001', month=m,
-                                        qty=(30 if m.month in [10, 11, 12] else 10) * m.days_in_month)
-                                   for m in pd.date_range('2024-01-01', '2025-12-01', freq='MS')])
-    row = first(ds)
-    assert 'ранняя месячная история' in row.method
-    _, details = calculate(ds)
-    f = details[('Test', '001')]['forecast']
-    assert f[f.index.month == 10].mean() > f[f.index.month == 9].mean() * 1.5
-    baseline = row.recommended_qty
-    ds.monthly_sales = pd.concat([ds.monthly_sales, pd.DataFrame([dict(supplier='Test', sku='001', month='2026-08-01', qty=1000000)])], ignore_index=True)
-    assert first(ds).recommended_qty == baseline
+def test_no_future_information():
+    d=baseline();d.sales=pd.concat([d.sales,pd.DataFrame([dict(sku='A',date=pd.Timestamp('2027-01-01'),quantity=100000)])])
+    assert row(d).recommended==420

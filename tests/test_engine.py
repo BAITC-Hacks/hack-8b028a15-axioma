@@ -73,3 +73,41 @@ def test_client_split_invoices_detected():
 def test_no_future_information():
     d=baseline();d.sales=pd.concat([d.sales,pd.DataFrame([dict(sku='A',date=pd.Timestamp('2027-01-01'),quantity=100000)])])
     assert row(d).recommended==420
+
+
+def test_unknown_stock_still_has_actionable_reorder_threshold():
+    d=baseline(); d.products.loc[0,'stock']=np.nan
+    r=row(d)
+    assert r.stock_threshold==420
+    assert '420.0' in r.reason
+    assert np.isnan(r.recommended)
+
+
+def test_current_month_transactions_do_not_change_completed_history():
+    d=baseline()
+    d.transactions=pd.DataFrame([
+        dict(sku='A', date=pd.Timestamp('2026-08-01')+pd.Timedelta(days=i),
+             quantity=2 if i<10 else 100, document=f'old-{i}', client_id='')
+        for i in range(11)])
+    before=row(d)
+    current=pd.DataFrame([
+        dict(sku='A',date=pd.Timestamp('2026-09-01'),quantity=100,
+             document=f'new-{i}',client_id='') for i in range(20)])
+    d.transactions=pd.concat([d.transactions,current],ignore_index=True)
+    after=row(d)
+    assert after.forecast==before.forecast
+    assert after.excluded==before.excluded
+
+
+def test_transaction_only_sku_keeps_history_when_other_sku_has_monthly_report():
+    d=baseline()
+    second=d.products.iloc[0].to_dict();second.update(sku='B',article='B')
+    d.products=pd.concat([d.products,pd.DataFrame([second])],ignore_index=True)
+    d.transactions=pd.DataFrame([
+        dict(sku='B',date=pd.Timestamp('2026-08-15'),quantity=31,
+             document='B-1',client_id=''),
+        dict(sku='A',date=pd.Timestamp('2026-08-15'),quantity=999,
+             document='A-1',client_id='')])
+    result=calculate(d,Settings(seasonality=False,trend=False))[0].set_index('sku')
+    assert result.loc['B','forecast']==35
+    assert result.loc['A','forecast']==350  # Monthly report wins; do not add twice.

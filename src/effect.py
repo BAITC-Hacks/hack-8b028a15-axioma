@@ -14,7 +14,7 @@ from .data import number
 from .engine import Settings, calculate
 from .planning import inventory_plan, receipt_schedule
 
-POLICIES={'mean':'Среднее за 6 месяцев','adaptive':'Axioma: автовыбор','pooled':'Axioma: общая ML-модель'}
+POLICIES={'mean':'Среднее за 6 месяцев','adaptive':'Axioma: текущий автовыбор','pooled':'Axioma: общая ML-модель'}
 MODES={'lost':'Потерянная продажа','backorder':'Отложенный заказ'}
 
 @dataclass(frozen=True)
@@ -42,7 +42,7 @@ def training_data(dataset,skus,review_date):
     train=deepcopy(dataset)
     cutoff=pd.Timestamp(review_date).replace(day=1).normalize()
     train.products=train.products[train.products.sku.isin(skus)].copy()
-    train.products=train.products.drop(columns=['source_growth','source_growth_percent'],errors='ignore')
+    train.products=train.products.drop(columns=['source_growth','source_growth_percent','lead_days'],errors='ignore')
     train.products['stock']=0. # Forecast-only; actual simulated balance is separate.
     for attr in ['sales','transactions']:
         frame=getattr(train,attr)
@@ -60,15 +60,16 @@ def forecast_bank(dataset,skus,experiment):
         base=Settings(as_of=str(day.date()),lead_days=experiment.lead_days,review_days=experiment.review_days,
                       safety_days=experiment.safety_days,compensate_stockout=False,approximate_stockout=False,use_source_growth=False)
         for policy in POLICIES:
-            cfg=replace(base,forecast_method='legacy' if policy=='mean' else policy)
+            cfg=replace(base,forecast_method='legacy' if policy=='mean' else 'auto' if policy=='adaptive' else policy)
             if policy=='mean':cfg=replace(cfg,remove_outliers=False,seasonality=False,trend=False)
-            _,histories,_=calculate(train,cfg)
+            calculated,histories,_=calculate(train,cfg)
+            method_names=calculated.set_index('sku')['method'].to_dict()
             for sku,h in histories.items():
                 curve=pd.DataFrame(h.attrs['future'])
                 rates=curve['Прогноз в день'].to_numpy(dtype=float)
                 bank[(policy,day,sku)]=rates
                 forecast_rows.append(dict(policy=policy,review_date=str(day.date()),sku=sku,
-                    training_before=str(day.replace(day=1).date()),method=h.attrs['model_info']['method'],
+                    training_before=str(day.replace(day=1).date()),method='Среднее за 6 месяцев, без поправок' if policy=='mean' else method_names[sku],
                     forecast_first_review_days=float(rates[:experiment.review_days].sum())))
     return bank,pd.DataFrame(forecast_rows)
 
@@ -157,7 +158,8 @@ def compare_inventory(dataset,experiment=Experiment(),opening_transit=None):
               opening_transit='Только явно переданный путь с known_on <= start; текущий путь из файлов не используется',
               product_rules='Текущие MOQ/кратность/единицы заморожены одинаково для всех политик как допущение; исторические изменения неизвестны',
               training_population='Общая модель обучается на выбранных до просмотра целевого периода SKU; выборка не представляет весь каталог',
-              model_status='Модели не изменялись и не выбирались по этому периоду; июнь–август уже просматривались, независимая проверка не заявляется',
+              policy_engine_methods={'mean':'legacy: среднее 6 месяцев, фильтр/сезонность/тренд выключены','adaptive':'auto: текущий компактный автовыбор объединённой версии','pooled':'pooled: общая модель'},
+              model_status='Алгоритмы объединённой версии команды зафиксированы; метод не выбирался по результату этого эксперимента; июнь–август уже просматривались, независимая проверка не заявляется',
               zero_demand_fill='Процент обслуживания не определён при нулевом спросе; такие товары отдельно учтены в знаменателях',
               sources=dataset.sources)
     if not evaluated:return pd.DataFrame(),pd.DataFrame(),pd.DataFrame(),pd.DataFrame(skipped,columns=['sku','reason']),meta,pd.DataFrame()

@@ -5,6 +5,7 @@ stock snapshots or target-month sales are exposed as future features.
 """
 import numpy as np
 import pandas as pd
+from threadpoolctl import threadpool_limits
 
 
 def features(y, target, use_seasonality=True, use_trend=True):
@@ -36,7 +37,8 @@ def pooled_forecasts(histories, future, use_seasonality=True, use_trend=True, se
     model=HistGradientBoostingRegressor(loss='poisson',max_iter=120,
         max_leaf_nodes=15,min_samples_leaf=20,learning_rate=.05,
         l2_regularization=10,early_stopping=False,random_state=42)
-    model.fit(np.asarray(X),np.asarray(Y))
+    # Bound native threads so a background benchmark does not freeze the UI.
+    with threadpool_limits(limits=2):model.fit(np.asarray(X),np.asarray(Y))
     result={sku:[] for sku in series}
     histories_rates={sku:(s.to_numpy()/s.index.days_in_month.to_numpy()).tolist() for sku,s in series.items()}
     months=pd.period_range(min(future).to_period('M'),max(future).to_period('M'),freq='M')
@@ -46,7 +48,7 @@ def pooled_forecasts(histories, future, use_seasonality=True, use_trend=True, se
         for sku in sku_list:
             x,scale=features(histories_rates[sku],month.to_timestamp(),use_seasonality,use_trend)
             batch.append(x);scales.append(scale)
-        predictions=model.predict(np.asarray(batch))
+        with threadpool_limits(limits=2):predictions=model.predict(np.asarray(batch))
         for sku,pred,scale in zip(sku_list,predictions,scales):
             y=histories_rates[sku]
             # Shrink toward the stable local mean rather than trusting a small panel.

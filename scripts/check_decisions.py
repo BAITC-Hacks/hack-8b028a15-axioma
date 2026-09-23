@@ -16,12 +16,13 @@ def main():
     parser.add_argument('--folder',type=Path)
     parser.add_argument('--supplier',default='Демо')
     parser.add_argument('--output',type=Path)
+    parser.add_argument('--method',choices=['auto','pooled','adaptive','classic'],default='pooled')
     args=parser.parse_args()
     started=time.perf_counter()
     files=[(p.name,p.read_bytes()) for p in sorted(args.folder.glob('*.xlsx'))] if args.folder else []
     if args.folder and not files:parser.error('No XLSX files in folder')
     ds=parse_files(files,args.supplier) if files else demo_data()
-    cfg=Settings(forecast_method='pooled',use_source_growth=False)
+    cfg=Settings(forecast_method=args.method,use_source_growth=False)
     result,histories,_=calculate(ds,cfg)
     summary,detail,delay=analyse_scenarios(ds,cfg,result,histories,ScenarioSettings())
     assert len(summary)==len(ds.products) and summary.sku.is_unique

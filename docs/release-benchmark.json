@@ -1,0 +1,384 @@
+{
+  "iek": {
+    "metadata": {
+      "start": "2026-03",
+      "end": "2026-08",
+      "sku_count": 2463,
+      "skipped": 0,
+      "observations": 14778,
+      "target": "Фактические месячные продажи после возвратов, с нижней границей 0",
+      "limitation": "Продажи не равны скрытому спросу: stockout и разовые проекты могут искажать оценку. Денежная экономия не измерялась.",
+      "protocol": "Последовательная проверка на прошлом. На каждом шаге обучение и выбор модели используют только более ранние месяцы. Текущие коэффициенты поставщика и остатки не используются.",
+      "supplier": "IEK"
+    },
+    "macro_improvement_percent": 3.2185340607843504,
+    "scores": [
+      {
+        "method": "mean6",
+        "model": "Среднее 6 месяцев",
+        "macro_wape": 1.4754522554098242,
+        "median_wape": 1.1255396307660177,
+        "scored_skus": 1694,
+        "zero_actual_skus": 769,
+        "zero_actual_with_forecast": 241,
+        "n": 14778
+      },
+      {
+        "method": "seasonal_naive",
+        "model": "Тот же месяц год назад",
+        "macro_wape": 2.365294223404001,
+        "median_wape": 1.097412706649863,
+        "scored_skus": 1694,
+        "zero_actual_skus": 769,
+        "zero_actual_with_forecast": 298,
+        "n": 14778
+      },
+      {
+        "method": "seasonal_level",
+        "model": "Сезонность и уровень",
+        "macro_wape": 1.4951644891846765,
+        "median_wape": 1.1324430206819611,
+        "scored_skus": 1694,
+        "zero_actual_skus": 769,
+        "zero_actual_with_forecast": 241,
+        "n": 14778
+      },
+      {
+        "method": "auto",
+        "model": "Автовыбор по прошлым периодам",
+        "macro_wape": 1.510997198406531,
+        "median_wape": 1.114814814814815,
+        "scored_skus": 1694,
+        "zero_actual_skus": 769,
+        "zero_actual_with_forecast": 175,
+        "n": 14778
+      },
+      {
+        "method": "axioma",
+        "model": "Axioma · очищенный спрос",
+        "macro_wape": 1.427964322018848,
+        "median_wape": 1.0443788882059717,
+        "scored_skus": 1694,
+        "zero_actual_skus": 769,
+        "zero_actual_with_forecast": 175,
+        "n": 14778
+      },
+      {
+        "method": "adaptive",
+        "model": "Расширенный автовыбор · редкий спрос",
+        "macro_wape": 1.4436019847209172,
+        "median_wape": 1.0567878004067202,
+        "scored_skus": 1694,
+        "zero_actual_skus": 769,
+        "zero_actual_with_forecast": 289,
+        "n": 14778
+      },
+      {
+        "method": "pooled",
+        "model": "Общая ML-модель",
+        "macro_wape": 1.4162339836580289,
+        "median_wape": 1.04702660304759,
+        "scored_skus": 1694,
+        "zero_actual_skus": 769,
+        "zero_actual_with_forecast": 241,
+        "n": 14778
+      }
+    ],
+    "units": [
+      {
+        "unit": "м",
+        "method": "adaptive",
+        "sku_count": 112,
+        "wape": 0.539188402648845,
+        "bias": -0.1095335761145981
+      },
+      {
+        "unit": "м",
+        "method": "auto",
+        "sku_count": 112,
+        "wape": 0.5220881333137629,
+        "bias": -0.07235622501537967
+      },
+      {
+        "unit": "м",
+        "method": "axioma",
+        "sku_count": 112,
+        "wape": 0.5132205628071586,
+        "bias": -0.1428573849237992
+      },
+      {
+        "unit": "м",
+        "method": "mean6",
+        "sku_count": 112,
+        "wape": 0.5900354095487583,
+        "bias": -0.17297197368459075
+      },
+      {
+        "unit": "м",
+        "method": "pooled",
+        "sku_count": 112,
+        "wape": 0.5575187179627807,
+        "bias": -0.17935345123099644
+      },
+      {
+        "unit": "м",
+        "method": "seasonal_level",
+        "sku_count": 112,
+        "wape": 0.5578086143173797,
+        "bias": -0.06746297322182306
+      },
+      {
+        "unit": "м",
+        "method": "seasonal_naive",
+        "sku_count": 112,
+        "wape": 0.952171698387801,
+        "bias": 0.42084135120712796
+      },
+      {
+        "unit": "упак",
+        "method": "adaptive",
+        "sku_count": 72,
+        "wape": 0.4259804107432287,
+        "bias": -0.034029576136827944
+      },
+      {
+        "unit": "упак",
+        "method": "auto",
+        "sku_count": 72,
+        "wape": 0.5371408573027798,
+        "bias": 0.03497195184143815
+      },
+      {
+        "unit": "упак",
+        "method": "axioma",
+        "sku_count": 72,
+        "wape": 0.4681830945022997,
+        "bias": -0.04830395076173295
+      },
+      {
+        "unit": "упак",
+        "method": "mean6",
+        "sku_count": 72,
+        "wape": 0.540777653502084,
+        "bias": 0.030138513888370327
+      },
+      {
+        "unit": "упак",
+        "method": "pooled",
+        "sku_count": 72,
+        "wape": 0.485263368941359,
+        "bias": -0.014963360788828444
+      },
+      {
+        "unit": "упак",
+        "method": "seasonal_level",
+        "sku_count": 72,
+        "wape": 0.5051802424237027,
+        "bias": 0.003326216675637684
+      },
+      {
+        "unit": "упак",
+        "method": "seasonal_naive",
+        "sku_count": 72,
+        "wape": 0.6651700469628942,
+        "bias": 0.4061000154822728
+      },
+      {
+        "unit": "шт",
+        "method": "adaptive",
+        "sku_count": 2279,
+        "wape": 0.38262004282552947,
+        "bias": -0.10584722852187785
+      },
+      {
+        "unit": "шт",
+        "method": "auto",
+        "sku_count": 2279,
+        "wape": 0.37668374394827836,
+        "bias": -0.03139884620226501
+      },
+      {
+        "unit": "шт",
+        "method": "axioma",
+        "sku_count": 2279,
+        "wape": 0.3658535602495152,
+        "bias": -0.10130057512321972
+      },
+      {
+        "unit": "шт",
+        "method": "mean6",
+        "sku_count": 2279,
+        "wape": 0.38270681586016997,
+        "bias": -0.04400242075754866
+      },
+      {
+        "unit": "шт",
+        "method": "pooled",
+        "sku_count": 2279,
+        "wape": 0.3622122053739389,
+        "bias": -0.09510400025281965
+      },
+      {
+        "unit": "шт",
+        "method": "seasonal_level",
+        "sku_count": 2279,
+        "wape": 0.36575500815386636,
+        "bias": -0.00307703317592728
+      },
+      {
+        "unit": "шт",
+        "method": "seasonal_naive",
+        "sku_count": 2279,
+        "wape": 0.48762547594323297,
+        "bias": 0.03737531073979672
+      }
+    ],
+    "comparison": {
+      "better": 975,
+      "worse": 911,
+      "equal": 577
+    }
+  },
+  "systeme": {
+    "metadata": {
+      "start": "2026-03",
+      "end": "2026-08",
+      "sku_count": 582,
+      "skipped": 0,
+      "observations": 3492,
+      "target": "Фактические месячные продажи после возвратов, с нижней границей 0",
+      "limitation": "Продажи не равны скрытому спросу: stockout и разовые проекты могут искажать оценку. Денежная экономия не измерялась.",
+      "protocol": "Последовательная проверка на прошлом. На каждом шаге обучение и выбор модели используют только более ранние месяцы. Текущие коэффициенты поставщика и остатки не используются.",
+      "supplier": "Systeme Electric"
+    },
+    "macro_improvement_percent": 6.082533840299254,
+    "scores": [
+      {
+        "method": "mean6",
+        "model": "Среднее 6 месяцев",
+        "macro_wape": 1.6491996666458075,
+        "median_wape": 0.9883616018091824,
+        "scored_skus": 474,
+        "zero_actual_skus": 108,
+        "zero_actual_with_forecast": 58,
+        "n": 3492
+      },
+      {
+        "method": "seasonal_naive",
+        "model": "Тот же месяц год назад",
+        "macro_wape": 2.527884464057059,
+        "median_wape": 1.1767962665432166,
+        "scored_skus": 474,
+        "zero_actual_skus": 108,
+        "zero_actual_with_forecast": 68,
+        "n": 3492
+      },
+      {
+        "method": "seasonal_level",
+        "model": "Сезонность и уровень",
+        "macro_wape": 1.547420191079928,
+        "median_wape": 1.0104936091174963,
+        "scored_skus": 474,
+        "zero_actual_skus": 108,
+        "zero_actual_with_forecast": 58,
+        "n": 3492
+      },
+      {
+        "method": "auto",
+        "model": "Автовыбор по прошлым периодам",
+        "macro_wape": 1.5725976445320666,
+        "median_wape": 1.0,
+        "scored_skus": 474,
+        "zero_actual_skus": 108,
+        "zero_actual_with_forecast": 49,
+        "n": 3492
+      },
+      {
+        "method": "axioma",
+        "model": "Axioma · очищенный спрос",
+        "macro_wape": 1.5488865388279738,
+        "median_wape": 1.0,
+        "scored_skus": 474,
+        "zero_actual_skus": 108,
+        "zero_actual_with_forecast": 49,
+        "n": 3492
+      },
+      {
+        "method": "adaptive",
+        "model": "Расширенный автовыбор · редкий спрос",
+        "macro_wape": 1.5179689779882983,
+        "median_wape": 0.9978987911871176,
+        "scored_skus": 474,
+        "zero_actual_skus": 108,
+        "zero_actual_with_forecast": 64,
+        "n": 3492
+      },
+      {
+        "method": "pooled",
+        "model": "Общая ML-модель",
+        "macro_wape": 1.5211367626300765,
+        "median_wape": 0.9401164153135316,
+        "scored_skus": 474,
+        "zero_actual_skus": 108,
+        "zero_actual_with_forecast": 58,
+        "n": 3492
+      }
+    ],
+    "units": [
+      {
+        "unit": "шт",
+        "method": "adaptive",
+        "sku_count": 582,
+        "wape": 0.24755928143035275,
+        "bias": -0.1072230533929864
+      },
+      {
+        "unit": "шт",
+        "method": "auto",
+        "sku_count": 582,
+        "wape": 0.24932749453529923,
+        "bias": -0.09523528521442404
+      },
+      {
+        "unit": "шт",
+        "method": "axioma",
+        "sku_count": 582,
+        "wape": 0.2459397841890077,
+        "bias": -0.10177469188780283
+      },
+      {
+        "unit": "шт",
+        "method": "mean6",
+        "sku_count": 582,
+        "wape": 0.28500787594265853,
+        "bias": -0.1273523653110657
+      },
+      {
+        "unit": "шт",
+        "method": "pooled",
+        "sku_count": 582,
+        "wape": 0.304584774683882,
+        "bias": -0.2006030573155192
+      },
+      {
+        "unit": "шт",
+        "method": "seasonal_level",
+        "sku_count": 582,
+        "wape": 0.23877026029281323,
+        "bias": -0.05829368303825714
+      },
+      {
+        "unit": "шт",
+        "method": "seasonal_naive",
+        "sku_count": 582,
+        "wape": 0.3362367364021007,
+        "bias": -0.022861109268058677
+      }
+    ],
+    "comparison": {
+      "better": 253,
+      "worse": 267,
+      "equal": 62
+    }
+  }
+}

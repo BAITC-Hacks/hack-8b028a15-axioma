@@ -62,11 +62,15 @@ def main():
     a=p.parse_args()
     if not 1<=a.repeats<=10:p.error('repeats must be 1..10')
     reports=[measure(a.root/folder,supplier,a.repeats) for folder,supplier in [('Systeme electric','Systeme Electric'),('IEK','IEK')]]
-    payload=dict(measured_at=datetime.now(timezone.utc).isoformat(),commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+    try:
+        revision=subprocess.run(['git','rev-parse','HEAD'],text=True,capture_output=True)
+        commit=revision.stdout.strip() if revision.returncode==0 else 'source archive; commit unavailable'
+    except OSError:commit='source archive; git unavailable'
+    payload=dict(measured_at=datetime.now(timezone.utc).isoformat(),commit=commit,
                  environment=dict(os=platform.system(),machine=platform.machine(),python=platform.python_version(),pandas=pd.__version__,numpy=np.__version__),
                  scope='XLSX read + forecast + finite scenarios + full recommendation XLSX in memory. Excludes UI, user review and network. No Streamlit cache; OS cache may be warm.',
                  settings=vars(Settings(forecast_method='pooled',use_source_growth=False)),grid=vars(ScenarioSettings()),repeats=a.repeats,reports=reports,
                  unmeasured=['manual Excel preparation time','manager review time','money saved','post-deployment stockouts'])
-    a.output.write_text(json.dumps(payload,ensure_ascii=False,indent=2)+'\n')
+    a.output.write_text(json.dumps(payload,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     print('Saved aggregate benchmark:',a.output)
 if __name__=='__main__':main()

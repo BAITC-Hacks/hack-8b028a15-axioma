@@ -1,3 +1,5 @@
+> Исторический отчёт предыдущего этапа. Актуальная объединённая версия: [release-validation.md](release-validation.md).
+
 # Проверка на Windows
 
 23 сентября 2026. Python 3.12, Streamlit 1.64.0, Pandas 3.0.1, NumPy 2.3.5, OpenPyXL 3.1.5, pytest 9.1.1.

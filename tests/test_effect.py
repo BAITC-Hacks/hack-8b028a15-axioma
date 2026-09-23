@@ -57,7 +57,7 @@ def test_opening_pipeline_is_separate_and_received_once():
 def test_future_and_unverifiable_inputs_cannot_change_first_decision():
     ds=baseline();changed=deepcopy(ds)
     changed.sales.loc[changed.sales.date.ge('2026-06-01'),'quantity']*=100
-    changed.products['stock']=999999;changed.products['source_growth']=3
+    changed.products['stock']=999999;changed.products['source_growth']=3;changed.products['lead_days']=365
     changed.transit=pd.DataFrame([dict(sku='A',eta=pd.Timestamp('2026-06-02'),quantity=999999)])
     changed.seasonal={i:9 for i in range(1,13)}
     a=compare_inventory(ds);b=compare_inventory(changed)

@@ -37,3 +37,4 @@ def test_shared_model_does_not_resurrect_dormant_products():
     result=calculate(ds,Settings(forecast_method='pooled'))[0].set_index('sku')
     assert result.loc['A0','forecast']==0
     assert result.loc['A0','recommended']==0
+

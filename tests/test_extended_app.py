@@ -14,3 +14,4 @@ def test_demo_loads_and_approval_requires_reviewer():
     app.button[0].click().run()
     assert not app.exception
     assert any('утверждён' in e.value for e in app.success)
+

@@ -68,3 +68,4 @@ def test_systeme_layout_stock_category_and_pack_are_imported():
     assert product.pack == 6
     assert product.growth_pct == 15
     assert ds.incoming.iloc[0].qty == 40
+

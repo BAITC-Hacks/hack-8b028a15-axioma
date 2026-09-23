@@ -7,3 +7,4 @@ if (-not (Test-Path -LiteralPath '.venv\Scripts\python.exe')) {
     if ($LASTEXITCODE -ne 0) { throw 'Не удалось установить зависимости.' }
 }
 & '.\.venv\Scripts\python.exe' -m streamlit run app.py --server.address 127.0.0.1 --browser.gatherUsageStats false
+

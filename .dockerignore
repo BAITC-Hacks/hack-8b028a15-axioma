@@ -4,7 +4,15 @@ __pycache__
 .pytest_cache
 data/private
 data/raw
+data/
+!data/demo/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+approved_orders/
+work/
 *.zip
 *.xlsx
 .env
+.env.*
 .streamlit/secrets.toml

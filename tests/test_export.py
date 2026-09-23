@@ -51,3 +51,4 @@ def test_csv_demo_roundtrip():
     before, _ = calculate(original)
     after, _ = calculate(imported)
     assert before.recommended_qty.tolist() == after.recommended_qty.tolist()
+

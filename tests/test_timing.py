@@ -55,3 +55,4 @@ def test_bridge_order_rounds_to_pack():
     row=calculate(ds,Settings())[0].iloc[0]
     assert row.bridge_need==115
     assert row.recommended==120
+

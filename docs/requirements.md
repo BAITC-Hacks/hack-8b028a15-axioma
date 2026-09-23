@@ -15,3 +15,4 @@
 Источники: https://docs.google.com/document/d/1Z4faOPlT1t6NMCuJSKKB8-vkZ2LVzGMR0PO9rtZgSnM/edit и https://edu.astanahub.com/hackathons/df4743f5-c492-415c-b45a-1f13adb78e06?tab=regulations
 
 Разработка ведётся с использованием AI-агента OpenAI Codex; код, методика, проверки и ограничения будут раскрыты в README.
+

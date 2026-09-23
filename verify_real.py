@@ -29,3 +29,4 @@ if __name__=='__main__':
                             elapsed_seconds=round(time.perf_counter()-start,2),warnings=ds.warnings))
         print(json.dumps(reports[-1],ensure_ascii=False),flush=True)
     target=Path(args.report);target.parent.mkdir(parents=True,exist_ok=True);target.write_text(json.dumps(reports,ensure_ascii=False,indent=2),encoding='utf-8')
+

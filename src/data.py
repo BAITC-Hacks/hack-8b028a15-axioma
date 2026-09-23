@@ -4,6 +4,7 @@ from datetime import datetime
 from io import BytesIO
 import re
 import zipfile
+import hashlib
 import numpy as np
 import pandas as pd
 
@@ -134,7 +135,7 @@ def parse_files(files, supplier):
                             value=number(row[11],np.nan)
                             if np.isfinite(value) and value>0: ds.seasonal[MONTHS[name[:3]]]=value
                 if not ds.seasonal:ds.warnings.append('В файле сезонности не найден готовый положительный коэффициент: сезонность будет оценена по продажам.')
-            ds.sources.append(dict(Файл=filename,Тип=detected,Строк=len(frame)))
+            ds.sources.append(dict(Файл=filename,Тип=detected,Строк=len(frame),SHA256=hashlib.sha256(content).hexdigest()))
             if detected=='Не распознан':ds.warnings.append(f'Не распознан файл: {filename}')
         except Exception as exc:ds.warnings.append(f'{filename}: {exc}')
     ds.products=pd.DataFrame(products.values()) if products else ds.products

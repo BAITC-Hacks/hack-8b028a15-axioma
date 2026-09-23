@@ -55,3 +55,4 @@ def backtest(dataset, as_of='2026-09-23', months=3, max_skus=30, include_pooled=
                                 pooled_wape=float((g.pooled-g.actual).abs().sum()/denom*100) if denom and include_pooled else np.nan))
     scores=pd.DataFrame(summary,columns=['sku','months','actual_total','model_wape','baseline_wape','adaptive_wape','pooled_wape'])
     return detail,scores,{'eligible_skus':len(eligible),'selected_skus':len(skus),'evaluated_skus':len(scores),'months':list(targets.strftime('%Y-%m'))}
+

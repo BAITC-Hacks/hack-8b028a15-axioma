@@ -8,3 +8,4 @@ Axioma — сервис закупок для Электрокомплект: Ex
 Репозиторий: https://github.com/BAITC-Hacks/hack-8b028a15-axioma
 
 Запуск: README.md. Защита: docs/DEMO.md. Результаты: docs/validation.md. Публичная размещённая версия не заявляется. Исходные коммерческие Excel не публикуются.
+

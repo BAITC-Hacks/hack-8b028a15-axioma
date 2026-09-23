@@ -87,6 +87,7 @@ def analyse_scenarios(dataset, cfg, result, histories, options=ScenarioSettings(
     delay_values=sorted({0,options.delay_days})
     assumptions=f'Остаток ±{options.stock_percent:g}%; спрос ±{options.demand_percent:g}%; ожидаемые поступления +0/+{options.delay_days} дн.; срок нового заказа {cfg.lead_days} дн. неизменен. Только проверенная сетка, не доверительный интервал.'
     for sku,p in products.iterrows():
+        sku_lead=int(number(p.get('lead_days'),cfg.lead_days))
         variants,age,snapshot_date=stock_variants(p,evidence.get(sku),asof,options.stock_percent)
         hist=histories.get(sku)
         future=pd.DataFrame(hist.attrs.get('future',[])) if hist is not None else pd.DataFrame()
@@ -95,6 +96,7 @@ def analyse_scenarios(dataset, cfg, result, histories, options=ScenarioSettings(
                     stock_min=min((v for v,_ in variants),default=np.nan),stock_max=max((v for v,_ in variants),default=np.nan),
                     scenario_count=0,order_min=np.nan,order_max=np.nan,urgency_any=False,urgency_all=False,
                     stock_changes_order=False,stock_changes_urgency=False,relative_order_span=0.,check_stock=False,count_priority=3)
+        common['scenario_assumptions']=assumptions.replace(f'{cfg.lead_days} дн. неизменен',f'{sku_lead} дн. неизменен')
         if future.empty or not variants:
             why='Нет завершённой истории продаж' if future.empty else 'Нет текущего остатка и пригодного снимка'
             common.update(robustness=INSUFFICIENT,sensitivity_reason=why,check_stock=not np.isfinite(p.stock),
@@ -111,7 +113,7 @@ def analyse_scenarios(dataset, cfg, result, histories, options=ScenarioSettings(
         for (stock,basis),factor,delay in product(variants,factors,delay_values):
             scenario_rates=rates*factor
             safety=float(scenario_rates.mean())*cfg.safety_days*cat
-            plan=inventory_plan(scenario_rates,schedules[delay],stock,cfg.lead_days,safety,pack,moq)
+            plan=inventory_plan(scenario_rates,schedules[delay],stock,sku_lead,safety,pack,moq)
             first=plan['first_shortage_index']
             records.append(dict(sku=sku,scenario_stock=stock,stock_assumption=basis,demand_multiplier=factor,delay_days=delay,
                                 scenario_forecast=float(scenario_rates.sum()),scenario_safety=safety,
@@ -141,8 +143,8 @@ def analyse_scenarios(dataset, cfg, result, histories, options=ScenarioSettings(
         base=result_by_sku.loc[sku]
         selected_stock=float(base.stock) if pd.notna(base.stock) else np.nan
         safety=float(rates.mean())*cfg.safety_days*cat
-        before=inventory_plan(rates,schedules[0],selected_stock,cfg.lead_days,safety,pack,moq)
-        after=inventory_plan(rates,schedules[7],selected_stock,cfg.lead_days,safety,pack,moq)
+        before=inventory_plan(rates,schedules[0],selected_stock,sku_lead,safety,pack,moq)
+        after=inventory_plan(rates,schedules[7],selected_stock,sku_lead,safety,pack,moq)
         first=after['first_shortage_index']
         delays.append(dict(sku=sku,delay_stock=selected_stock,delay_order_before=before['recommended'],delay_order_after=after['recommended'],
                            delay_order_change=after['recommended']-before['recommended'],delay_expedite_before=before['expedite_need'],

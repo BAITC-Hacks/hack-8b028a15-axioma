@@ -9,3 +9,4 @@ if __name__ == '__main__':
     for name in ['products', 'sales', 'incoming', 'stockouts']:
         getattr(dataset, name).to_csv(target / f'{name}.csv', index=False, encoding='utf-8-sig')
     print('Synthetic demo generated in data/demo')
+

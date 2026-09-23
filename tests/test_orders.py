@@ -18,3 +18,4 @@ def test_supplier_identity_and_reapproval_replace_not_duplicate():
 @pytest.mark.parametrize('quantity',[0,9,13,float('nan'),float('inf')])
 def test_invalid_order_quantities_cannot_enter_cart(quantity):
     with pytest.raises(ValueError):add_reviewed_lines(pd.DataFrame(),lines(quantity=quantity))
+

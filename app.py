@@ -1,4 +1,5 @@
 from copy import deepcopy
+from dataclasses import replace
 from datetime import date
 from io import BytesIO
 from pathlib import Path
@@ -8,6 +9,7 @@ import pandas as pd
 import streamlit as st
 from src.data import demo_data, parse_files
 from src.engine import Settings, calculate
+from src.scenarios import stock_scenario, annotate_scenario
 
 st.set_page_config(page_title='Axioma · Закупки',page_icon='◈',layout='wide')
 st.markdown('''<style>
@@ -25,7 +27,7 @@ def load_files(files,supplier):return parse_files(files,supplier)
 @st.cache_data(show_spinner=False)
 def run(ds,cfg):return calculate(ds,cfg)
 
-LABELS={'sku':'Код 1С','article':'Артикул','name':'Товар','category':'Категория','supplier':'Поставщик','unit':'Ед.','stock':'Свободный остаток','in_transit':'Приедет в период','late_transit':'Приедет позже','forecast':'Прогноз спроса','safety':'Страховой запас','daily':'Спрос в день','growth':'Тренд, %','season':'Сезонный коэффициент','excluded':'Исключено всплесков','lost':'Восстановлено спроса','pack':'Кратность','moq':'Минимальная партия','recommended':'Рекомендация','status':'Статус','reason':'Обоснование','stockout_mode':'Оценка отсутствия'}
+LABELS={'stock_basis':'Основание остатка','snapshot_date':'Дата снимка','snapshot_stock':'Остаток в снимке','recorded_sales':'Продажи после снимка','scenario_stock':'Сценарный остаток','snapshot_age_days':'Возраст снимка, дней','sku':'Код 1С','article':'Артикул','name':'Товар','category':'Категория','supplier':'Поставщик','unit':'Ед.','stock':'Свободный остаток','in_transit':'Приедет в период','late_transit':'Приедет позже','forecast':'Прогноз спроса','safety':'Страховой запас','daily':'Спрос в день','growth':'Тренд, %','season':'Сезонный коэффициент','excluded':'Исключено всплесков','lost':'Восстановлено спроса','pack':'Кратность','moq':'Минимальная партия','recommended':'Рекомендация','status':'Статус','reason':'Обоснование','stockout_mode':'Оценка отсутствия'}
 
 def export_excel(frame, cfg):
     buffer=BytesIO()
@@ -124,8 +126,19 @@ with st.expander('Данные и допущения · проверить пе�
     cat_frame=st.data_editor(pd.DataFrame({'Категория':categories,'Множитель':[1.]*len(categories)}),disabled=['Категория'],hide_index=True,key=f'cat-{mode}-{supplier}',column_config={'Множитель':st.column_config.NumberColumn(min_value=0.,max_value=5.)})
     category_factors=dict(zip(cat_frame['Категория'],cat_frame['Множитель']))
 
+stock_evidence=pd.DataFrame()
+if ds.products.stock.isna().any() and not ds.stocks.empty:
+    st.markdown('**Расчёт при неполных данных об остатках**')
+    scenario=st.radio('Как рассчитать неизвестные остатки?', ['Только известные остатки','Сценарий: остаток на начало месяца','Сценарий: вычесть продажи без поступлений'], horizontal=True)
+    if scenario!='Только известные остатки':
+        ds,stock_evidence=stock_scenario(ds,str(as_of),'reference' if scenario=='Сценарий: остаток на начало месяца' else 'depletion')
+        st.warning(f'Сценарный расчёт для {len(stock_evidence)} товаров. Поступления, резервы и другие движения после снимка неизвестны. Это не фактические остатки и не границы возможного запаса. Позиции без достаточных данных остаются неизвестными.')
+        with st.expander('Из чего получились сценарные остатки'):
+            st.dataframe(stock_evidence.rename(columns=LABELS),hide_index=True,width='stretch')
+
 cfg=Settings(str(as_of),int(lead),int(review),int(safety),float(growth),remove,seasonal,trend,compensate,approx,category_factors)
 with st.spinner('Считаю спрос и заказы…'):result,histories,anomalies=run(ds,cfg)
+if not stock_evidence.empty:result=annotate_scenario(result,stock_evidence)
 if result.empty:st.warning('Нет позиций для расчёта');st.stop()
 result=result.assign(_priority=result.status.map({'Срочно':0,'Заказать':1,'Нужен остаток':2,'Нет истории':3,'Достаточно':4})).sort_values(['_priority','sku']).drop(columns='_priority').reset_index(drop=True)
 cards=st.columns(4)
@@ -133,7 +146,7 @@ cards[0].metric('Товаров в анализе',len(result))
 cards[1].metric('Нужно заказать',int(result.recommended.gt(0).sum()))
 cards[2].metric('Риск дефицита',int(result.status.eq('Срочно').sum()))
 cards[3].metric('Нужны данные',int(result.recommended.isna().sum()))
-orders_tab,detail_tab,quality_tab=st.tabs(['Рекомендации','Почему столько','Качество данных'])
+orders_tab,detail_tab,quality_tab,comparison_tab=st.tabs(['Рекомендации','Почему столько','Качество данных','Сравнение методов'])
 with orders_tab:
     a,b=st.columns([2,1]);search=a.text_input('Найти товар',placeholder='Название, артикул или код')
     statuses=b.multiselect('Статус',list(result.status.unique()),default=list(result.status.unique()))
@@ -141,19 +154,20 @@ with orders_tab:
     if search:selected=selected[selected[['sku','article','name']].astype(str).apply(lambda s:s.str.contains(search,case=False,regex=False)).any(axis=1)]
     chosen_categories=st.multiselect('Категории',categories)
     if chosen_categories:selected=selected[selected.category.astype(str).isin(chosen_categories)]
-    columns=['status','sku','article','name','stock','in_transit','forecast','recommended']
+    columns=['stock_basis','status','sku','article','name','stock','in_transit','forecast','recommended']
     st.dataframe(selected[[c for c in columns if c in selected]].rename(columns=LABELS),hide_index=True,width='stretch')
     st.download_button('Скачать все рекомендации · Excel',export_excel(result,cfg),file_name=f'axioma-{as_of}.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     with st.expander('Проверить и утвердить заказ'):
         draft=result[result.recommended.gt(0)].copy()
         if draft.empty:st.info('Нет положительных рекомендаций для утверждения.')
         else:
-            draft=draft[['sku','article','name','supplier','recommended','pack','moq']].copy();draft['Утвердить']=False;draft['К заказу']=draft.recommended
-            reviewed=st.data_editor(draft.rename(columns=LABELS),hide_index=True,disabled=['Код 1С','Артикул','Товар','Поставщик','Рекомендация','Кратность','Минимальная партия'],column_config={'К заказу':st.column_config.NumberColumn(min_value=0)},key=f'approval-{mode}-{supplier}')
+            draft=draft[[c for c in ['sku','article','name','supplier','recommended','pack','moq','stock_basis','snapshot_date'] if c in draft]].copy();draft['Утвердить']=False;draft['К заказу']=draft.recommended
+            reviewed=st.data_editor(draft.rename(columns=LABELS),hide_index=True,disabled=['Код 1С','Артикул','Товар','Поставщик','Рекомендация','Кратность','Минимальная партия','Основание остатка','Дата снимка'],column_config={'К заказу':st.column_config.NumberColumn(min_value=0)},key=f'approval-{mode}-{supplier}')
             approved=reviewed[reviewed['Утвердить']&reviewed['К заказу'].gt(0)]
             bad=approved[(approved['К заказу']<approved['Минимальная партия'])|~np.isclose(approved['К заказу']%approved['Кратность'],0)]
             if len(bad):st.error('Исправьте количество: оно должно соответствовать минимуму и кратности.')
-            st.download_button('Скачать утверждённые позиции',export_excel(approved,cfg),file_name='axioma-approved.xlsx',disabled=approved.empty or not bad.empty)
+            acknowledge=True if stock_evidence.empty else st.checkbox('Понимаю: это сценарный заказ с предполагаемыми остатками')
+            st.download_button('Скачать утверждённые позиции',export_excel(approved,cfg),file_name='axioma-approved.xlsx',disabled=approved.empty or not bad.empty or not acknowledge)
             st.caption('Скачивание не отправляет заказ поставщику. Утверждение действует в текущей сессии; сохраните файл.')
 with detail_tab:
     sku=st.selectbox('Выберите товар',list(histories),format_func=lambda k:f"{k} · {result.set_index('sku').loc[k,'name']}") if histories else None
@@ -171,5 +185,22 @@ with quality_tab:
     st.dataframe(pd.DataFrame(ds.sources),hide_index=True,width='stretch')
     if not anomalies.empty:st.markdown('**Обнаруженные всплески**');st.dataframe(anomalies,hide_index=True,width='stretch')
     else:st.info('Всплески не обнаружены либо нет детальных продаж для их проверки.')
-    st.warning('Неизвестный остаток блокирует заказ. Неизвестные или просроченные даты поступления требуют уточнения. Без client_id невозможно проверить покупки одного клиента между разными накладными.')
+    st.warning('Без выбранного сценария неизвестный остаток блокирует заказ. Сценарные остатки всегда помечены в результатах. Неизвестные или просроченные даты поступления требуют уточнения. Без client_id невозможно проверить покупки одного клиента между разными накладными.')
     st.caption('Прототип HackAlem AI · AI-агент Codex использован при разработке. Расчёт детерминированный; внешние AI API не вызываются.')
+
+with comparison_tab:
+    st.subheader('Что меняет обработка спроса')
+    st.write('Сравните три расчёта на одинаковых товарах, остатках и сроках: обычное среднее за 6 завершённых месяцев; текущая модель без удаления всплесков; выбранная вами модель.')
+    st.caption('Это сравнение рекомендаций, а не проверка точности на будущих продажах. Меньший заказ сам по себе не доказывает экономию. Количества разных товаров не складываются.')
+    if st.button('Рассчитать сравнение'):
+        with st.spinner('Сравниваю методы на одинаковых входных данных…'):
+            simple=run(ds,replace(cfg,remove_outliers=False,seasonality=False,trend=False,compensate_stockout=False))[0]
+            unclean=run(ds,replace(cfg,remove_outliers=False))[0]
+        comparison=result[[c for c in ['sku','name','recommended','stock_basis','snapshot_date'] if c in result]].rename(columns={'recommended':'Выбранная модель'})
+        comparison=comparison.merge(simple[['sku','recommended']].rename(columns={'recommended':'Обычное среднее'}),on='sku',validate='one_to_one')
+        comparison=comparison.merge(unclean[['sku','recommended']].rename(columns={'recommended':'Без удаления всплесков'}),on='sku',validate='one_to_one')
+        comparison['Разница со средним']=comparison['Выбранная модель']-comparison['Обычное среднее']
+        comparison['Влияние фильтра всплесков']=comparison['Выбранная модель']-comparison['Без удаления всплесков']
+        comparison=comparison.sort_values('Влияние фильтра всплесков',key=lambda x:x.abs(),ascending=False)
+        st.dataframe(comparison.rename(columns=LABELS),hide_index=True,width='stretch')
+        st.download_button('Скачать сравнение методов',export_excel(comparison,cfg),file_name='axioma-method-comparison.xlsx')
